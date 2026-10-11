@@ -1,0 +1,160 @@
+{
+  "input_file": "/sessions/rcw-011ttqs9is2gmwj5yvypv6ag/mnt/Groxa AI Solution - Orbit/output/jobs_linkedin_20261008_152046.json",
+  "summary": {
+    "as_of": "2026-10-08T10:24:09+00:00",
+    "include_ambiguous_date": false,
+    "total_jobs_collected": 3,
+    "passed_each_filter_independently": {
+      "gcc_bfsi": 3,
+      "employment_type": 3,
+      "india_location": 3,
+      "posted_24h": 1
+    },
+    "cumulative_funnel": [
+      {
+        "filter": "gcc_bfsi",
+        "label": "Potential GCC or BFSI",
+        "remaining": 3
+      },
+      {
+        "filter": "employment_type",
+        "label": "Employment type (Permanent/Contract)",
+        "remaining": 3
+      },
+      {
+        "filter": "india_location",
+        "label": "India location",
+        "remaining": 3
+      },
+      {
+        "filter": "posted_24h",
+        "label": "Posted within last 24 hours",
+        "remaining": 1
+      }
+    ],
+    "final_jobs": 1,
+    "excluded_jobs": 2,
+    "excluded_by_filter": {
+      "posted_24h": 2
+    },
+    "excluded_by_reason": {
+      "posted_older_than_24h": 2
+    },
+    "notes": [
+      "GCC/BFSI is a keyword-based POTENTIAL classification, not a confirmation.",
+      "LinkedIn public pages give a calendar date and a relative age, not an exact posting time; see posted_at_precision / posted_within_24h_certainty on each job.",
+      "first_seen_at is the Phase 1 collected_at (no database yet)."
+    ]
+  },
+  "jobs": [
+    {
+      "source": "LinkedIn",
+      "job_id": "4438121997",
+      "title": "Director of Software Engineering - Data & Wealth Management",
+      "company": "JPMorganChase",
+      "company_url": "https://www.linkedin.com/company/jpmorganchase",
+      "description": "Job Description\n\nIf you are a software engineering leader ready to take the reins and drive impact, we've got an opportunity just for you.\n\nAs a Director of Software Engineering at JPMorganChase within the Consumer & Community Banking , you lead a technical area and drive impact within teams, technologies, and projects across departments. Utilize your in-depth knowledge of software, applications, technical processes, and product management to drive multiple complex projects and initiatives, while serving as a primary decision maker for your teams and be a driver of innovation and solution delivery.\n\nJob Responsibilities\n\n- Single threaded owner for delivering end-to-end impactful technical solutions collaborating with the product, business partners and other Engineering teams.\n- Leads technology and process implementations to achieve functional technology objectives\n- Sets direction and governance for agentic AI-enabled engineering and SDLC/TLM automation within a technical area to drive measurable improvements in speed, quality, and operational outcomes (e.g., AI-orchestrated delivery workflows, release readiness controls, automated test modernization, and incident triage acceleration), while establishing guardrails for validation, security, resiliency, traceability, and reuse across teams.\n- Applies knowledge of tools within the Software Development Life Cycle toolchain, including enterprise-authorized AI-assisted development and automation capabilities, to improve the value realized by automation and support capacity unlock initiatives at scale.\n- Makes decisions that influence teams' resources, budget, tactical operations, and the execution and implementation of processes and procedures\n- Carries governance accountability for coding decisions, control obligations, and measures of success such as cost of ownership, maintainability, and portfolio operations\n- Delivers reusable technical solutions that can be leveraged across multiple businesses and domains\n- Influences peer leaders and senior stakeholders across the business, product, and technology teams\n- Champions the firm's culture of diversity, opportunity, inclusion, and respect\n- Champions every day innovation \n\nRequired Qualifications, Capabilities, And Skills\n\n- Formal training or certification on software engineering concepts and 10+ years applied experience. In addition, 5+ years of experience leading technologists to manage, anticipate and solve complex technical items within your domain of expertise\n- Leadership Experience in Financial domain with strong Engineering and Data expertise\n- Experience in championing AI led engineering and delivering significant productivity gains\n- Experience leading adoption of agentic AI-enabled engineering practices (using enterprise-authorized tools within the work environment) across teams, including defining operating expectations (human-in-the-loop validation, quality gates), measuring outcomes, and ensuring secure handling of sensitive inputs/outputs.\n- Strong understanding of responsible AI use and control expectations in engineering workflows, including data sensitivity, resiliency/security implications, and governance; ability to influence leaders on safe scaling patterns and reuse.\n- Experience developing and leading cross-functional teams of technologists\n- Experience with hiring, developing, and recognizing talent\n- Practical cloud native experience\n- Expertise in Computer Science, Computer Engineering, Mathematics, or a related technical field\n- A continuous learner and demonstrate ability to adapt and lead a change. \n\nPreferred Qualifications, Capabilities, And Skills\n\n- Experience in Wealth Management Sub-Domain\n- Experience in working with Lead Management.\n- Experience working at Architecture and Design Level\n\nABOUT US\n\n Show more\n\n Show less",
+      "location": "Bengaluru, Karnataka, India",
+      "country": "India",
+      "potential_gcc": false,
+      "potential_bfsi": true,
+      "classification_reason": "Potential BFSI: LinkedIn industry 'Financial Services'; job title 'wealth management'. Potential GCC: no GCC signals found. Keyword-based indication only - not a confirmed GCC/BFSI classification.",
+      "classification_signals": [
+        {
+          "category": "bfsi",
+          "field": "industries",
+          "term": "Financial Services",
+          "strength": "strong",
+          "matched": "financial"
+        },
+        {
+          "category": "bfsi",
+          "field": "title",
+          "term": "wealth management",
+          "strength": "strong",
+          "matched": null
+        }
+      ],
+      "employment_type": "Permanent",
+      "employment_type_raw": "Full-time",
+      "job_url": "https://www.linkedin.com/jobs/view/4438121997",
+      "posted_at": "2026-10-08T09:33:46+00:00",
+      "posted_at_precision": "estimated_from_relative_minutes",
+      "posted_within_24h_certainty": "estimated",
+      "posted_age_text": "17 minutes ago",
+      "first_seen_at": "2026-10-08T09:50:46+00:00",
+      "industries": "Financial Services",
+      "seniority_level": "Not Applicable",
+      "job_function": null,
+      "filter_results": {
+        "gcc_bfsi": {
+          "passed": true,
+          "code": "ok",
+          "reason": "Potential BFSI: LinkedIn industry 'Financial Services'; job title 'wealth management'. Potential GCC: no GCC signals found. Keyword-based indication only - not a confirmed GCC/BFSI classification."
+        },
+        "employment_type": {
+          "passed": true,
+          "code": "ok",
+          "reason": "'Full-time' -> Permanent"
+        },
+        "india_location": {
+          "passed": true,
+          "code": "ok",
+          "reason": "'Bengaluru, Karnataka, India' is in India"
+        },
+        "posted_24h": {
+          "passed": true,
+          "code": "ok",
+          "reason": "'17 minutes ago' at collection; estimated 0.8h old at filter time (+/- 1 minute)"
+        }
+      },
+      "raw_data": {
+        "search_card_html": "<div class=\"base-card relative w-full hover:no-underline focus:no-underline base-card--link base-search-card base-search-card--link job-search-card\" data-column=\"1\" data-entity-urn=\"urn:li:jobPosting:4438121997\" data-impression-id=\"jobs-search-result-2\" data-reference-id=\"cdsL1Qz/7EhfekiH9NT3jg==\" data-row=\"3\" data-tracking-id=\"Fb6CL9AKOuwu+NQG4Tpw7g==\">\n<a class=\"base-card__full-link absolute top-0 right-0 bottom-0 left-0 p-0 z-[2] outline-offset-[4px]\" data-tracking-client-ingraph=\"\" data-tracking-control-name=\"public_jobs_jserp-result_search-card\" data-tracking-will-navigate=\"\" href=\"https://in.linkedin.com/jobs/view/director-of-software-engineering-data-wealth-management-at-jpmorganchase-4438121997?position=3&amp;pageNum=0&amp;refId=cdsL1Qz%2F7EhfekiH9NT3jg%3D%3D&amp;trackingId=Fb6CL9AKOuwu%2BNQG4Tpw7g%3D%3D\">\n<span class=\"sr-only\">\n              \n        \n        Director of Software Engineering - Data &amp; Wealth Management\n      \n      \n          </span>\n</a>\n<div class=\"search-entity-media\">\n<img alt=\"\" class=\"artdeco-entity-image artdeco-entity-image--square-4\" data-delayed-url=\"https://media.licdn.com/dms/image/v2/D4E0BAQGxpntCyRgsuA/company-logo_100_100/company-logo_100_100/0/1718711710850/jpmorganchase_logo?e=2147483647&amp;v=beta&amp;t=kP6Xf9uye25nDGkk4RmP87zYyfNqaQWny7e5o3WyKhI\" data-ghost-classes=\"artdeco-entity-image--ghost\" data-ghost-url=\"https://static.licdn.com/aero-v1/sc/h/6puxblwmhnodu6fjircz4dn4h\"/>\n</div>\n<div class=\"base-search-card__info\">\n<h3 class=\"base-search-card__title\">\n            \n        Director of Software Engineering - Data &amp; Wealth Management\n      \n          </h3>\n<h4 class=\"base-search-card__subtitle\">\n<a class=\"hidden-nested-link\" data-tracking-client-ingraph=\"\" data-tracking-control-name=\"public_jobs_jserp-result_job-search-card-subtitle\" data-tracking-will-navigate=\"\" href=\"https://www.linkedin.com/company/jpmorganchase?trk=public_jobs_jserp-result_job-search-card-subtitle\">\n            JPMorganChase\n          </a>\n</h4>\n<!-- -->\n<div class=\"base-search-card__metadata\">\n<span class=\"job-search-card__location\">\n            Bengaluru, Karnataka, India\n          </span>\n<div class=\"job-posting-benefits text-sm\">\n<icon class=\"job-posting-benefits__icon\" data-delayed-url=\"https://static.licdn.com/aero-v1/sc/h/3p1v0uhy7uq0cm5zdvzp4eo18\" data-svg-class-name=\"job-posting-benefits__icon-svg\"></icon>\n<span class=\"job-posting-benefits__text\">\n          Actively Hiring\n<!-- --> </span>\n</div>\n<time class=\"job-search-card__listdate--new\" datetime=\"2026-10-08\">\n            \n\n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n\n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n\n      17 minutes ago\n  \n          </time>\n<!-- -->\n</div>\n</div>\n<!-- -->\n</div>",
+        "json_ld": null,
+        "criteria": {
+          "seniority level": "Not Applicable",
+          "employment type": "Full-time",
+          "industries": "Financial Services"
+        }
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "job_id": "4474609165",
+      "title": "Global Banking & Markets Operations- IB Ops Client Onboarding-Vice President-Bengaluru",
+      "company": "Goldman Sachs",
+      "job_url": "https://www.linkedin.com/jobs/view/4474609165",
+      "location": "Bengaluru, Karnataka, India",
+      "employment_type_raw": "Full-time",
+      "posted_age_text": "2 days ago",
+      "failed_filters": [
+        "posted_24h"
+      ],
+      "reason_codes": [
+        "posted_older_than_24h"
+      ],
+      "reasons": [
+        "Posted within last 24 hours: posted '2 days ago' - at least 24h old (LinkedIn rounds relative ages down)"
+      ]
+    },
+    {
+      "job_id": "4443262848",
+      "title": "The Core-Bengaluru-Vice President-Software Engineering",
+      "company": "Goldman Sachs",
+      "job_url": "https://www.linkedin.com/jobs/view/4443262848",
+      "location": "Bengaluru, Karnataka, India",
+      "employment_type_raw": "Full-time",
+      "posted_age_text": "5 days ago",
+      "failed_filters": [
+        "posted_24h"
+      ],
+      "reason_codes": [
+        "posted_older_than_24h"
+      ],
+      "reasons": [
+        "Posted within last 24 hours: posted '5 days ago' - at least 24h old (LinkedIn rounds relative ages down)"
+      ]
+    }
+  ]
+}

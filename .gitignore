@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+logs/*.log
+output/*.json
+.DS_Store
+
+# Phase 3 data
+data/*.json
+data/*.tmp
+data_demo/
+data/*.lock
+data/*.txt
+data/backups/
+.env
