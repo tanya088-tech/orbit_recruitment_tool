@@ -59,6 +59,8 @@ def main() -> int:
             skip_ids = {line.strip() for line in fh if line.strip()}
         log.info("Skipping %d job IDs that are already collected", len(skip_ids))
     result = Collector(get_source(args.source)).run(searches, output_dir=args.output_dir, skip_ids=skip_ids)
+    if result.stats.setup_error:
+        return 3                      # this source cannot run here yet (see the SETUP REQUIRED line in the log)
     return 2 if result.stats.blocked else 0
 
 

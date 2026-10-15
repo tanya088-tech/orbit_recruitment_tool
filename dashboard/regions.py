@@ -87,3 +87,69 @@ class RegionResolver:
 
 def build_region_resolver(india_locations: Iterable[Optional[str]]) -> RegionResolver:
     return RegionResolver(india_locations)
+
+
+# ---------------------------------------------------------------- State filter
+# Normalisation reference (NOT the dropdown): it only turns the spellings found in job locations into one official
+# name. The State dropdown lists just the states that actually occur in the stored vacancies.
+_STATE_NAMES = (
+    "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana",
+    "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya",
+    "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura",
+    "Uttar Pradesh", "Uttarakhand", "West Bengal",
+    "Andaman and Nicobar Islands", "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu", "Delhi",
+    "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry",
+)
+_STATE_ALIASES = {
+    "orissa": "Odisha", "uttaranchal": "Uttarakhand", "pondicherry": "Puducherry", "chattisgarh": "Chhattisgarh",
+    "tamilnadu": "Tamil Nadu", "nct of delhi": "Delhi", "new delhi": "Delhi", "delhi ncr": "Delhi", "ncr": "Delhi",
+    "national capital region": "Delhi", "j k": "Jammu and Kashmir", "jammu kashmir": "Jammu and Kashmir",
+    "andaman nicobar islands": "Andaman and Nicobar Islands", "daman and diu": "Dadra and Nagar Haveli and Daman and Diu",
+    "dadra and nagar haveli": "Dadra and Nagar Haveli and Daman and Diu", "dadra nagar haveli": "Dadra and Nagar Haveli and Daman and Diu",
+    "orrisa": "Odisha", "andhra": "Andhra Pradesh", "bengal": "West Bengal", "up": "Uttar Pradesh", "mp": "Madhya Pradesh",
+}
+# Cities that appear on their own ("Pune", "Greater Noida Area") with no state written next to them.
+_CITY_STATE = {
+    "bengaluru": "Karnataka", "bangalore": "Karnataka", "mysuru": "Karnataka", "mysore": "Karnataka", "mangaluru": "Karnataka",
+    "hubballi": "Karnataka", "belagavi": "Karnataka", "mumbai": "Maharashtra", "navi mumbai": "Maharashtra", "thane": "Maharashtra",
+    "pune": "Maharashtra", "nagpur": "Maharashtra", "nashik": "Maharashtra", "aurangabad": "Maharashtra", "hyderabad": "Telangana",
+    "secunderabad": "Telangana", "warangal": "Telangana", "chennai": "Tamil Nadu", "coimbatore": "Tamil Nadu", "madurai": "Tamil Nadu",
+    "tiruchirappalli": "Tamil Nadu", "salem": "Tamil Nadu", "gurugram": "Haryana", "gurgaon": "Haryana", "faridabad": "Haryana",
+    "panipat": "Haryana", "noida": "Uttar Pradesh", "greater noida": "Uttar Pradesh", "ghaziabad": "Uttar Pradesh", "lucknow": "Uttar Pradesh",
+    "kanpur": "Uttar Pradesh", "agra": "Uttar Pradesh", "varanasi": "Uttar Pradesh", "prayagraj": "Uttar Pradesh", "kolkata": "West Bengal",
+    "howrah": "West Bengal", "siliguri": "West Bengal", "ahmedabad": "Gujarat", "gandhinagar": "Gujarat", "surat": "Gujarat",
+    "vadodara": "Gujarat", "rajkot": "Gujarat", "gift city": "Gujarat", "jaipur": "Rajasthan", "jodhpur": "Rajasthan", "udaipur": "Rajasthan",
+    "kochi": "Kerala", "cochin": "Kerala", "thiruvananthapuram": "Kerala", "trivandrum": "Kerala", "kozhikode": "Kerala",
+    "visakhapatnam": "Andhra Pradesh", "vijayawada": "Andhra Pradesh", "amaravati": "Andhra Pradesh", "tirupati": "Andhra Pradesh",
+    "bhopal": "Madhya Pradesh", "indore": "Madhya Pradesh", "bhubaneswar": "Odisha", "cuttack": "Odisha", "patna": "Bihar",
+    "ranchi": "Jharkhand", "jamshedpur": "Jharkhand", "raipur": "Chhattisgarh", "bhilai": "Chhattisgarh", "dehradun": "Uttarakhand",
+    "guwahati": "Assam", "panaji": "Goa", "margao": "Goa", "shimla": "Himachal Pradesh", "srinagar": "Jammu and Kashmir",
+    "jammu": "Jammu and Kashmir", "mohali": "Punjab", "ludhiana": "Punjab", "amritsar": "Punjab", "jalandhar": "Punjab",
+}
+_STATE_BY_NORM = {_norm(n): n for n in _STATE_NAMES}
+_STATE_BY_NORM.update({_norm(k): v for k, v in _STATE_ALIASES.items()})
+
+
+def indian_state(location: Optional[str], learned_city_region: Optional[Callable[[str], str]] = None) -> str:
+    """The official state / union territory named by an India location, or "" when it names none.
+
+    Used only for locations already judged to be in India. A state written in the text wins (last part first); a lone
+    well-known city maps to its state; a city learned from "City, State" locations in the data may also map.
+    Missing or unrecognised text gives "" - it is never guessed."""
+    parts = _place_parts(location)
+    if not parts:
+        return ""
+    for p in reversed(parts):
+        hit = _STATE_BY_NORM.get(_norm(p))
+        if hit:
+            return hit
+    for p in parts:
+        n = _norm(p)
+        hit = _CITY_STATE.get(n) or _CITY_STATE.get(_norm(_core(p)))
+        if hit:
+            return hit
+        if learned_city_region:
+            learned = _STATE_BY_NORM.get(_norm(learned_city_region(p) or ""))
+            if learned:
+                return learned
+    return ""

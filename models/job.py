@@ -57,6 +57,19 @@ class Job:
     recruiter_email: Optional[str] = None
     recruiter_phone: Optional[str] = None
     contact_url: Optional[str] = None
+    experience: Optional[str] = None         # the source's own experience requirement, e.g. Naukri "0 - 2 years"
+    salary: Optional[str] = None             # as the source states it, e.g. "₹18,000 - ₹20,000 a month"; None if undisclosed
+    skills: list[str] = field(default_factory=list)   # key skills / tags the source lists
+    work_mode_text: Optional[str] = None     # the source's own workplace wording, e.g. Naukri "Hybrid" / "Work from office"
+    openings: Optional[str] = None           # number of openings, as the source states it
+    applicants: Optional[str] = None         # as the source states it, e.g. "Less than 10" or "100+"
+    education: Optional[str] = None          # e.g. "UG: Any Graduate"
+    role_category: Optional[str] = None      # e.g. "Procurement & Purchase"
+    posted_by: Optional[str] = None          # consultancy / recruiter name when the employer itself is confidential
+    employment_details: Optional[str] = None # the source's employment wording exactly, e.g. "Full Time, Permanent"
+    company_website: Optional[str] = None    # the company's own website, only when the source states it (never guessed)
+    company_rating: Optional[str] = None     # Naukri's company rating, e.g. "3.7" (only when the page shows it)
+    company_reviews: Optional[str] = None    # Naukri's company review count, e.g. "689" or "6.6K" (never applicants)
     raw: dict[str, Any] = field(default_factory=dict)   # untouched source data
     collected_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -77,6 +90,7 @@ class RunStats:
     skipped_duplicate: int = 0
     skipped_out_of_range: int = 0
     blocked: bool = False             # True if the site started refusing us
+    setup_error: Optional[str] = None  # why a source could not run at all (e.g. browser support not installed)
     latest_ids: list[str] = field(default_factory=list)   # job IDs taken, newest first (only filled with count_known)
     failures: list[dict[str, str]] = field(default_factory=list)
     started_at: str = field(

@@ -1,4 +1,4 @@
-"""Tiny local web server for the Orbit recruiter dashboard (standard library only).
+"""Tiny local web server for the Ace Talent Consulting recruiter dashboard (standard library only).
 
 Routes
   GET  /                              Page 1: recruiter summary (filters in the query string)
@@ -7,6 +7,7 @@ Routes
   POST /job/<key>/status              set recruitment status   (field: status)
   POST /job/<key>/notes               add a note               (field: note)
   POST /job/<key>/notes/<id>/delete   delete a note
+  POST /collection/saved              show the saved vacancies that match the form (no search)
   POST /collection/run                start a background job collection (fields: scope, count)
   GET  /collection/status             collection status as JSON
   POST /app/restart                   restart the dashboard process (refused while collecting)
@@ -23,6 +24,7 @@ import json
 import logging
 import re
 import threading
+import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -58,6 +60,7 @@ class DashboardApp:
                  static_dir: Optional[Path] = None) -> None:
         self.history, self.state, self.banner = history, state, banner
         self.collection, self.restart_fn = collection, restart_fn
+        self.boot_id = uuid.uuid4().hex          # changes with every process start: the restart page waits for a different one
         self.static_dir = Path(static_dir) if static_dir else STATIC_DIR
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         views.set_logo(f"/static/{branding.LOGO_FILE}" if branding.logo_available(self.static_dir) else None)
@@ -93,7 +96,7 @@ def safe_q(value: str) -> str:
 
 def make_handler(app: DashboardApp):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "OrbitDashboard/1.0"
+        server_version = "AceTalentDashboard/1.0"
 
         def log_message(self, fmt, *args):      # keep the terminal quiet; use -v style logging if needed
             log.debug("%s - %s", self.address_string(), fmt % args)
@@ -158,7 +161,9 @@ def make_handler(app: DashboardApp):
             if length > MAX_BODY:
                 raise StoreError("request too large")
             raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
-            return {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+            lists = parse_qs(raw, keep_blank_values=True)
+            self.form_lists = lists                       # every value of a repeated field (the Source tick-boxes)
+            return {k: v[0] for k, v in lists.items()}
 
         # ------------------------------------------------------ GET
         def do_GET(self):
@@ -179,6 +184,8 @@ def make_handler(app: DashboardApp):
 
             if path == "/healthz":
                 return self._send(200, b"ok", "text/plain; charset=utf-8")
+            if path == "/app/boot":
+                return self._send(200, json.dumps({"boot": app.boot_id}).encode("utf-8"), "application/json; charset=utf-8")
             if path.startswith("/static/"):
                 name = unquote(path[len("/static/"):])
                 if name not in STATIC_TYPES:
@@ -201,6 +208,7 @@ def make_handler(app: DashboardApp):
         def _summary(self, params):
             now = app.now()
             rows = app.rows()
+            all_rows = rows                      # the State list is built from everything stored, not just the latest request
             f = vm.Filters.from_query(params)
             result_set = None
             cv = app.collection_view()
@@ -209,10 +217,14 @@ def make_handler(app: DashboardApp):
                 # the last "N vacancies" request: show exactly those vacancies (nothing is removed from the history)
                 keep = set(keys)
                 result_set = {"shown": 0, "target": cv["status"].get("target"), "total": len(rows), "at": cv["status"].get("result_at"), "window": cv["status"].get("window")}
+                collected = int(cv["status"].get("collected_unique") or len(keys))
                 rows = [r for r in rows if r.key in keep]
                 result_set["shown"] = len(rows)
-                if "scope" not in params:
-                    f.scope = "all"             # the request was for the newest postings, wherever they are
+                # Why the page can show fewer than the request says: jobs counted when the collection ran that today's GCC/BFSI
+                # rules no longer accept (dropped before this point), and jobs outside the chosen Location scope.
+                in_scope = len(vm.apply_filters(rows, vm.Filters(scope=f.scope), app.now()))
+                result_set.update(collected=collected, hidden_by_rules=max(len(keys) - len(rows), 0),
+                                  hidden_by_scope=len(rows) - in_scope, scope=f.scope, in_scope=in_scope)
             elif keys:
                 result_set = {"shown": None, "target": cv["status"].get("target"), "total": len(rows), "at": cv["status"].get("result_at"),
                               "available": len(keys)}
@@ -222,7 +234,7 @@ def make_handler(app: DashboardApp):
             hidden_by_scope = len(rows) - len(vm.apply_filters(rows, scope_only, now)) if f.scope != "all" else 0
             notice = (params.get("notice") or [""])[0]
             notice = notice if notice in views.NOTICES else ""
-            html_text = views.render_summary(len(rows), page, vm.summary_cards(matched), f, vm.filter_options(rows),
+            html_text = views.render_summary(len(rows), page, vm.summary_cards(matched), f, vm.filter_options(all_rows),
                                              app.history.latest_run(), now, app.banner, cv,
                                              hidden_by_scope, notice, result_set)
             self._html(200, html_text)
@@ -250,6 +262,8 @@ def make_handler(app: DashboardApp):
             path = urlsplit(self.path).path
             if path == "/collection/run":
                 return self._collection_run()
+            if path == "/collection/saved":
+                return self._collection_run(saved=True)
             if path == "/app/restart":
                 return self._restart()
             note_del = _NOTE_DELETE.match(path)
@@ -278,20 +292,28 @@ def make_handler(app: DashboardApp):
             target = safe_next(form["next"], default) if "next" in form else default
             self._redirect(target)
 
-        def _collection_run(self):
+        def _collection_run(self, saved: bool = False):
             form = self._form()
             if app.collection is None:
                 return self._redirect("/?notice=disabled")
             scope = form.get("scope", "")
             if scope not in loc_config.SCOPES:
                 return self._redirect("/?notice=bad")
-            target = parse_target(form.get("count", ""))
-            if target is None:
+            raw_count = (form.get("count", "") or "").strip()
+            target = parse_target(raw_count) if raw_count else None       # blank = collect every eligible vacancy (within the limits)
+            if raw_count and target is None:
                 return self._redirect("/?notice=bad_count")
             window = form.get("window") or settings.COLLECTION_DEFAULT_WINDOW
             if window not in settings.COLLECTION_WINDOWS:
                 return self._redirect("/?notice=bad")
-            ok, _msg = app.collection.start(scope, target, window)
+            picked = [x for x in self.form_lists.get("source", []) if x in settings.SUPPORTED_SOURCES]
+            if "sources_sent" in form and not picked:
+                return self._redirect("/?notice=bad_source")
+            fetch_filters = vm.clean_fetch_filters({k: form.get("f_" + k, "") for k in vm.FETCH_FILTER_KEYS})
+            if saved:
+                ok, _msg = app.collection.show_saved(scope, target, window, sources=picked or None, filters=fetch_filters)
+                return self._redirect("/?notice=saved" if ok else "/?notice=already")
+            ok, _msg = app.collection.start(scope, target, window, sources=picked or None, filters=fetch_filters)
             self._redirect("/?notice=started" if ok else "/?notice=already")
 
         def _restart(self):
@@ -300,6 +322,6 @@ def make_handler(app: DashboardApp):
             if app.collection is not None and app.collection.running:
                 return self._redirect("/?notice=restart_blocked")
             threading.Timer(0.8, app.restart_fn).start()
-            self._html(200, views.render_restarting(app.now()))
+            self._html(200, views.render_restarting(app.now(), app.boot_id))
 
     return Handler

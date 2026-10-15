@@ -80,7 +80,8 @@ def test_successful_run_collects_normalizes_and_ingests(tmp_path):
     later = [dict(j, collected_at="2026-10-09T09:50:00+00:00") for j in jobs]
     m.runner = fake_runner(tmp_path / "out", later)
     m.start("india")
-    assert len(history.list_jobs()) == 2 and m.status()["last_summary"]["new"] == 0 and m.status()["last_summary"]["existing"] == 2
+    # (India-only: the Dubai posting is skipped, not re-counted; the saved Dubai job stays in the history)
+    assert len(history.list_jobs()) == 2 and m.status()["last_summary"]["new"] == 0 and m.status()["last_summary"]["existing"] == 1
 
 
 def test_blocked_run_is_partial_and_keeps_what_was_collected(tmp_path):
@@ -156,7 +157,7 @@ def test_a_second_run_cannot_start_while_one_is_running(tmp_path):
     assert ok and started.wait(5) and m.running
     ok2, msg = m.start("india")
     assert not ok2 and "already running" in msg
-    # another Orbit window (another process on the same folder) is refused by the lock file too
+    # another Ace Talent Consulting window (another process on the same folder) is refused by the lock file too
     lock = tmp_path / "collection.lock"
     saved_lock = lock.read_text()
     lock.write_text(json.dumps({"pid": os.getppid()}))              # as if it belonged to another, live Orbit process
@@ -273,7 +274,7 @@ def test_restart_runs_the_restart_hook_and_shows_a_waiting_page(tmp_path):
     srv = serve(app); port = srv.server_address[1]
     try:
         status, _, h = call(port, "POST", "/app/restart", {})
-        assert status == 200 and "Restarting Orbit Job Radar" in h and "data-restart-poll" in h
+        assert status == 200 and "Restarting Ace Talent Consulting Job Radar" in h and "data-restart-poll" in h
         assert fired.wait(3)
     finally:
         srv.shutdown(); srv.server_close()

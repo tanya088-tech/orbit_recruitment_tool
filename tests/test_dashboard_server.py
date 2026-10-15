@@ -70,12 +70,14 @@ def test_summary_page_has_cards_filters_table_and_security_headers(tmp_path):
         assert status == 200 and "script-src 'self'" in headers["content-security-policy"]
         for label in ["Total openings", "Permanent openings", "Contract openings"]:
             assert f"<span>{label}</span>" in html, label
-        for label in ["Location scope", "Employment type", "Source", "Job posted", "Work mode"]:
+        for label in ["Location scope", "State", "Employment type", "Work mode"]:
             assert f">{label}</label>" in html, label
+        for gone in ['for="f-source"', 'for="f-posted"', "Job posted</label>"]:
+            assert gone not in html, gone
         for gone in ["Company</label>", "Job title or keyword", "GCC / BFSI", "GCC vacancies", "BFSI vacancies", "New vacancies", "Recruitment status"]:
             assert gone not in html, gone
-        for opt in ["Within India", "Outside India", "All locations", "Last 24 hours", "Last 3 days", "Last 7 days", "Last 15 days",
-                    "Last 1 month", "All", "Permanent", "Contract", "On-site", "Hybrid", "Remote", "LinkedIn"]:
+        for opt in ["Within India", "Outside India", "All locations", "Last 24 hours", "Last 3 days", "Last 7 days",
+                    "Last 30 days", "All", "Permanent", "Contract", "On-site", "Hybrid", "Remote"]:
             assert f">{opt}</option>" in html, opt
         for col in ["Job title", "Company", "Location", "Industry", "Employment type", "Posted", "Source"]:
             assert col in html
@@ -107,13 +109,12 @@ def test_default_sort_newest_first_and_other_sorts(tmp_path):
 def test_filters_over_http(tmp_path):
     with running(tmp_path) as (port, _):
         t = lambda q: set(titles(get(port, "/?" + q)[2]))
-        assert t("posted=24h") == {"Credit Risk Analyst", "Technology Lead GCC", "Payments Associate"}
-        assert row_count(get(port, "/?posted=3d")[2]) == 4 and row_count(get(port, "/?posted=7d")[2]) == 5
+        # Source and Job posted are no longer dashboard filters: links that still carry them show everything
+        for gone in ("posted=24h", "posted=3d", "source=Naukri", "source=LinkedIn&posted=24h"):
+            assert row_count(get(port, "/?" + gone)[2]) == 6, gone
         assert t("work_mode=Remote") == {"Payments Associate"} and row_count(get(port, "/?employment=Remote")[2]) == 6
-        assert row_count(get(port, "/?posted=15d")[2]) == 5 and row_count(get(port, "/?posted=1m")[2]) == 5
         assert t("employment=Contract") == {"KYC Analyst", "Insurance Underwriter"}
-        assert t("source=LinkedIn&posted=24h&employment=Permanent") == {"Credit Risk Analyst", "Technology Lead GCC", "Payments Associate"}
-        assert row_count(get(port, "/?source=Naukri")[2]) == 0
+        assert row_count(get(port, "/?state=Maharashtra&employment=Permanent")[2]) == 2
         # the removed filters are ignored
         for removed in ("classification=gcc", "location=Maharashtra", "company=acme", "keyword=zzz", "status=Reviewing", "saved=1"):
             assert row_count(get(port, "/?" + removed)[2]) == 6, removed
@@ -124,11 +125,11 @@ def test_filters_over_http(tmp_path):
 
 def test_no_match_and_hostile_filter_values_are_handled(tmp_path):
     with running(tmp_path) as (port, _):
-        status, _, html = get(port, "/?posted=24h&employment=Contract")
+        status, _, html = get(port, "/?state=Nowhere&employment=Contract")
         assert status == 200 and "No vacancies match these filters" in html and row_count(html) == 0
         status, _, html = get(port, "/?posted=forever&scope=%3Cscript%3E&page=-9&sort=drop+table&source=%3Cscript%3Ealert(1)%3C/script%3E")
         assert status == 200 and "<script>alert(1)" not in html
-        assert row_count(get(port, "/?source=%3Cscript%3E")[2]) == 0
+        assert row_count(get(port, "/?state=%3Cscript%3E")[2]) == 0 and "<script>" not in get(port, "/?state=%3Cscript%3E")[2]
 
 
 def test_empty_history_shows_guidance(tmp_path):
@@ -154,7 +155,7 @@ def test_details_page_shows_every_required_field(tmp_path):
         status, _, html = get(port, f"/job/{KEYS['A']}")
         assert status == 200
         for needle in ["Credit Risk Analyst", "Acme Bank", "Pune, Maharashtra, India", "Banking &amp; Finance", "Financial Services", "Permanent",
-                       "LinkedIn", "1001", "about 20 minutes ago", "Estimated from LinkedIn", "Open Original Job", "Original job URL",
+                       "LinkedIn", "1001", "Just now", "Estimated from the source", "Open Original Job", "Original job URL",
                        "Job summary", "Full job description", "Save job", "Recruitment status", "Add a note"]:
             assert needle in html, needle
         assert "Line 1 of the description." in html and "Line 2 about &lt;b&gt;risk&lt;/b&gt; models." in html   # full text, escaped
@@ -194,11 +195,11 @@ def test_details_page_with_missing_data(tmp_path):
 
 def test_back_link_keeps_filters_and_rejects_hostile_q(tmp_path):
     with running(tmp_path) as (port, _):
-        html = get(port, "/?posted=24h&employment=Permanent")[2]
+        html = get(port, "/?state=Maharashtra&employment=Permanent")[2]
         link = re.search(r'href="(/job/linkedin-1001\?q=[^"]*)"', html).group(1)
         detail = get(port, link.replace("&amp;", "&"))[2]
         back = re.search(r'<a href="(/\?[^"]*)">Back to vacancies</a>', detail).group(1)
-        assert "posted=24h" in back and "employment=Permanent" in back
+        assert "state=Maharashtra" in back and "employment=Permanent" in back
         evil = get(port, f"/job/{KEYS['A']}?q=" + urllib.parse.quote("<script>alert(1)</script>"))[2]
         assert '<a href="/">Back to vacancies</a>' in evil
 

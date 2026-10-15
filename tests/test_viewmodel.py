@@ -27,6 +27,9 @@ def ids(rows):
 
 def apply(rows, **q):
     f = vm.Filters.from_query(q)
+    # Source / Job posted are no longer URL filters (they live in the collection panel); the engine still supports them in code.
+    f.source = q.get("source", "")
+    f.posted = q.get("posted", "all") if q.get("posted", "all") in vm.POSTED_OPTIONS else "all"
     return vm.sort_rows(vm.apply_filters(rows, f, NOW), f.sort)
 
 
@@ -34,12 +37,12 @@ def apply(rows, **q):
 def test_posted_parsing_and_labels():
     est = vm.parse_posted({"posted_at": ago(minutes=17), "posted_at_precision": "estimated_from_relative_minutes"})
     assert est.moment and not est.day and est.estimated
-    assert vm.format_age(est, NOW) == "about 17 minutes ago" and vm.format_precision(est) == "estimated time"
+    assert vm.format_age(est, NOW) == "Just now" and vm.format_precision(est) == "estimated time"
     exact = vm.parse_posted({"posted_at": ago(hours=3), "posted_at_precision": "exact_timestamp"})
     assert vm.format_age(exact, NOW) == "3 hours ago" and vm.format_precision(exact) == "exact time"
     day = vm.parse_posted({"posted_at": "2026-10-05", "posted_at_precision": "date_only"})
     assert day.day == date(2026, 10, 5) and day.moment is None
-    assert vm.format_age(day, NOW) == "5 Oct 2026" and vm.format_precision(day) == "date only"
+    assert vm.format_age(day, NOW) == "3 days ago" and vm.format_precision(day) == "date only"
     assert "no time available" in vm.format_moment(day)         # a date-only job never gets a made-up time
     for bad in [{}, {"posted_at": None}, {"posted_at": "garbage"}, {"posted_at": "2026-13-45"}]:
         p = vm.parse_posted(bad)
@@ -196,9 +199,11 @@ def test_removed_filters_are_ignored_and_combined_filters_work():
 
 def test_query_parsing_round_trips_and_only_five_filters_count():
     assert vm.Filters.from_query({"posted": "forever", "employment": "Intern", "sort": "random", "page": "-3"}) == vm.Filters()
-    g = vm.Filters.from_query({"scope": "all", "employment": "Contract", "source": "LinkedIn", "posted": "3d",
+    g = vm.Filters.from_query({"scope": "all", "employment": "Contract", "state": "Karnataka",
                                "work_mode": "Hybrid", "page": "2"})
-    assert g.active_count == 5
+    assert g.active_count == 4
+    # removed dropdowns: links that still carry them are ignored, not applied as a hidden filter
+    assert vm.Filters.from_query({"source": "Naukri", "posted": "3d"}) == vm.Filters()
     assert vm.Filters.from_query(dict(parse_qsl(g.to_query()))) == g
     assert vm.Filters().to_query() == "" and vm.Filters().active_count == 0
 
@@ -216,7 +221,9 @@ def test_summary_cards_are_total_permanent_contract_and_follow_filters():
 
 def test_filter_options_offer_sources_found_in_the_data():
     rows = rows_from([make_record(1), make_record(2, source="Naukri"), make_record(3, source=None)])
-    assert vm.filter_options(rows) == {"sources": ["LinkedIn", "Naukri"]}
+    assert vm.filter_options(rows) == {"sources": ["LinkedIn", "Naukri"], "states": ["Maharashtra"]}      # every supported source is selectable
+    odd = rows_from([make_record(1, source="Shine")])
+    assert vm.filter_options(odd) == {"sources": ["LinkedIn", "Naukri", "Shine"], "states": ["Maharashtra"]}   # plus anything found in the data
 
 
 # ------------------------------------------------------------------ industry on rows, missing data
@@ -239,3 +246,77 @@ def test_rows_survive_completely_empty_and_old_format_records():
     assert len(vm.apply_filters(rows, vm.Filters(scope="all"), NOW)) == 2
     assert vm.apply_filters(rows, vm.Filters(), NOW) == []             # unknown location: only under All locations
     assert vm.summary_cards(rows)["total"] == 2
+
+
+def test_posting_age_wording_is_the_same_for_every_source():
+    def age(**kw):
+        return vm.format_age(vm.parse_posted({"posted_at": ago(**kw), "posted_at_precision": "exact_timestamp"}), NOW)
+    cases = [({"seconds": 20}, "Just now"), ({"minutes": 59}, "Just now"), ({"minutes": 60}, "1 hour ago"), ({"hours": 5}, "5 hours ago"),
+             ({"hours": 23, "minutes": 59}, "23 hours ago"), ({"hours": 24}, "1 day ago"), ({"hours": 47}, "1 day ago"),
+             ({"hours": 48}, "2 days ago"), ({"days": 9}, "9 days ago")]
+    for kw, want in cases:
+        assert age(**kw) == want, (kw, age(**kw))
+    for precision in ("exact_timestamp", "estimated_from_relative_minutes", "estimated_from_relative_hours"):     # same words, any precision
+        assert vm.format_age(vm.parse_posted({"posted_at": ago(hours=2), "posted_at_precision": precision}), NOW) == "2 hours ago"
+    day = lambda s: vm.format_age(vm.parse_posted({"posted_at": s, "posted_at_precision": "date_only"}), NOW)
+    assert day("2026-10-08") == "Today" and day("2026-10-07") == "1 day ago" and day("2026-10-05") == "3 days ago"
+    assert vm.format_age(vm.parse_posted({}), NOW) == "Not available"
+
+
+def test_naukri_and_linkedin_postings_are_worded_alike_end_to_end():
+    from processing.pipeline import normalize_all
+    from datetime import datetime, timezone
+    asof = datetime(2026, 10, 12, 10, 0, tzinfo=timezone.utc)
+    base = {"job_url": "https://x.test/1", "title": "T", "company": "C", "location": "Pune, India", "description": "d", "employment_type": "Full-time"}
+    jobs = [dict(base, source="LinkedIn", job_id="1", job_url="https://x.test/1", posted_age_text="5 hours ago", collected_at="2026-10-12T10:00:00+00:00"),
+            dict(base, source="Naukri", job_id="2", job_url="https://x.test/2", posted_age_text="Just now", posted_date="2026-10-12", collected_at="2026-10-12T10:00:00+00:00"),
+            dict(base, source="Naukri", job_id="3", job_url="https://x.test/3", posted_age_text="2 days ago", posted_date="2026-10-10", collected_at="2026-10-12T10:00:00+00:00")]
+    recs = {r["job_id"]: r for r in normalize_all(jobs, as_of=asof).jobs}
+    words = {k: vm.format_age(vm.parse_posted(r), asof) for k, r in recs.items()}
+    assert words == {"1": "5 hours ago", "2": "Just now", "3": "2 days ago"}
+
+
+def _rec(i, company, src="LinkedIn", **kw):
+    return {"key": f"{src.lower()}-{i}", "record": make_record(i, company=company, source=src, **kw)}
+
+
+def test_naukri_website_is_shown_only_when_naukri_states_it_and_never_leaks_to_linkedin_jobs():
+    rows = vm.build_rows([_rec(1, "Schneider Electric", "Naukri", company_website="https://www.se.com/ww/en/"),
+                          _rec(2, "Schneider Electric", "Naukri"),                    # second Naukri job of the company: reuses it
+                          _rec(3, "Acme Bank", "Naukri"),                              # nobody states a website
+                          _rec(4, "Confidential", "Naukri", company_website="https://a.example"), _rec(5, "Confidential", "Naukri"),
+                          _rec(6, "Twin Co", "Naukri", company_website="https://one.example"),
+                          _rec(7, "Twin Co", "Naukri", company_website="https://two.example"), _rec(8, "Twin Co", "Naukri"),
+                          _rec(9, "Schneider Electric", "LinkedIn", company_url="https://in.linkedin.com/company/schneider-electric")], {}, None)
+    by = {r.job_id: r for r in rows}
+    assert by["1"].company_website == "https://www.se.com/ww/en/" and by["1"].company_link_note == ""
+    assert by["2"].company_website == "https://www.se.com/ww/en/" and "another listing" in by["2"].company_link_note
+    assert by["3"].company_website is None and by["5"].company_website is None and by["8"].company_website is None
+    assert by["9"].company_website is None                                               # a LinkedIn job shows a LinkedIn page, not a website
+    assert by["9"].company_linkedin == "https://www.linkedin.com/company/schneider-electric"
+
+
+def test_linkedin_company_page_must_be_a_real_company_page_and_is_canonicalised():
+    f = vm.linkedin_company_page
+    assert f("https://in.linkedin.com/company/yes-bank") == "https://www.linkedin.com/company/yes-bank"
+    assert f("https://www.linkedin.com/company/Goldman-Sachs/?trk=x#a") == "https://www.linkedin.com/company/goldman-sachs"
+    for bad in ("https://www.linkedin.com/in/someone", "https://www.linkedin.com/school/mit", "https://www.linkedin.com/jobs/view/123",
+                "https://www.linkedin.com/company/", "https://www.linkedin.com/company/a/jobs", "https://evil.example/company/yes-bank",
+                "https://notlinkedin.com/company/x", "https://www.linkedin.com.evil.example/company/x", "javascript:alert(1)", "", None):
+        assert f(bad) is None, bad
+
+
+def test_linkedin_company_pages_are_reused_only_when_unambiguous():
+    li = lambda i, company, url=None: _rec(i, company, company_url=url)
+    rows = vm.build_rows([li(1, "HSBC", "https://uk.linkedin.com/company/hsbc"), li(2, "HSBC"),
+                          li(3, "Twin Bank", "https://www.linkedin.com/company/twin-a"), li(4, "Twin Bank", "https://www.linkedin.com/company/twin-b"),
+                          li(5, "Twin Bank"),
+                          li(6, "Confidential", "https://www.linkedin.com/company/x"), li(7, "Confidential"),
+                          li(8, "Lone Co"),
+                          li(9, "Odd Co", "https://www.linkedin.com/in/a-person")], {}, None)
+    by = {r.job_id: r for r in rows}
+    assert by["1"].company_linkedin == "https://www.linkedin.com/company/hsbc" and by["1"].company_link_note == ""
+    assert by["2"].company_linkedin == "https://www.linkedin.com/company/hsbc" and "another LinkedIn job" in by["2"].company_link_note
+    assert by["3"].company_linkedin is None and by["4"].company_linkedin is None and by["5"].company_linkedin is None   # the jobs disagree
+    assert by["7"].company_linkedin is None and by["8"].company_linkedin is None
+    assert by["9"].company_linkedin is None                                                  # a person's profile is not a company page

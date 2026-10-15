@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 3: start the Orbit recruiter dashboard (open the printed address in your browser).
+"""Phase 3: start the Ace Talent Consulting recruiter dashboard (open the printed address in your browser).
 
 Examples
   python run_dashboard.py                  # your real vacancy history (data/)
@@ -43,13 +43,16 @@ def _fetch_logo_in_background() -> None:
 
 
 def _restart_process() -> None:
-    """Start this same command again in place (without --open, the browser tab is already open)."""
+    """Start this same command again in place (without --open, the browser tab is already open). Called from the main
+    thread after the web server has been shut down and its port released, so the new process can bind straight away."""
     args = [a for a in sys.argv if a != "--open"]
+    sys.stdout.flush()
+    sys.stderr.flush()
     os.execv(sys.executable, [sys.executable] + args)
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Orbit recruiter dashboard.")
+    p = argparse.ArgumentParser(description="Ace Talent Consulting recruiter dashboard.")
     p.add_argument("--data-dir", default=str(settings.DATA_DIR))
     p.add_argument("--host", default=settings.DASHBOARD_HOST)
     p.add_argument("--port", type=int, default=settings.DASHBOARD_PORT)
@@ -84,16 +87,27 @@ def main() -> int:
 
     url = f"http://{args.host}:{args.port}/"
     if _already_running(args.host, args.port):
-        print(f"Orbit Job Radar is already running at {url}. Opening it in your browser.")
+        print(f"Ace Talent Consulting Job Radar is already running at {url}. Opening it in your browser.")
         if args.open:
             webbrowser.open(url)
         return 0
 
     collection = None if args.demo else CollectionManager(history, data_dir)
     _fetch_logo_in_background()
-    app = DashboardApp(history, state, banner=banner, collection=collection, restart_fn=_restart_process)
+    restart_requested = threading.Event()
+    holder: dict = {}
+
+    def request_restart() -> None:
+        """Called by the Restart button: stop serving; main() then replaces this process with a fresh one."""
+        restart_requested.set()
+        if holder.get("server") is not None:
+            holder["server"].shutdown()
+
+    app = DashboardApp(history, state, banner=banner, collection=collection, restart_fn=request_restart)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
-    print(f"\nOrbit dashboard running at {url}\n  vacancies in history: {len(history.list_jobs())}"
+    server.daemon_threads = True              # an open connection must never keep the old process alive during a restart
+    holder["server"] = server
+    print(f"\nAce Talent Consulting dashboard running at {url}\n  vacancies in history: {len(history.list_jobs())}"
           f"\n  data folder: {data_dir}\n  Press Ctrl+C to stop.\n")
     if args.open:
         webbrowser.open(url)
@@ -105,6 +119,9 @@ def main() -> int:
         if collection is not None:
             collection.mark_interrupted()
         server.server_close()
+    if restart_requested.is_set():
+        print("\nRestarting Ace Talent Consulting Job Radar ...", flush=True)
+        _restart_process()                    # does not return
     return 0
 
 

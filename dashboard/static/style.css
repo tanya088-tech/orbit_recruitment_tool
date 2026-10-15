@@ -59,6 +59,9 @@ h1.page-title { font-family: var(--serif); font-size: 28px; margin: 0 0 4px; fon
 .btn-primary { background: var(--link); border-color: var(--link); color: #fff; }
 .btn-primary:hover { background: #26329a; }
 .btn-sm { padding: 4px 10px; font-size: 13px; }
+.btn-reset { border-color: var(--link); color: var(--link); background: #fff; }
+.btn-reset:hover { background: #eef0fb; }
+.btn-reset:focus-visible { outline: 3px solid #9aa5ee; outline-offset: 2px; }
 .btn-quiet { border-color: transparent; background: transparent; color: var(--link); }
 .btn[aria-disabled=true] { opacity: .55; cursor: not-allowed; }
 
@@ -212,3 +215,10 @@ table.details td .sub { display: block; }
 table.details ul.points { margin: 0; }
 table.details .description { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) { table.details th[scope=row] { width: 120px; } }
+.collect-persource { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted, #4a5068); }
+.tag-contact { color: #14633f; background: #e6f6ee; border-color: #b5dfc8; }
+.tag-nocontact { color: #8a5a00; background: #fff8e4; border-color: #e6c77a; }
+
+.collect-filters { border: 1px solid var(--line, #d9dde3); border-radius: 6px; padding: 8px 10px; margin: 6px 0; display: grid; gap: 6px; }
+.collect-filters legend { font-weight: 600; padding: 0 4px; }
+.collect-filters .field { display: grid; gap: 2px; }

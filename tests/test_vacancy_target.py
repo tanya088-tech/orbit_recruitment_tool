@@ -203,12 +203,12 @@ def test_the_result_survives_a_restart_and_history_is_never_trimmed(tmp_path):
 
 
 # ---- the dashboard ---------------------------------------------------------------------------------------------
-def test_panel_has_a_required_number_field_with_the_three_quick_picks(tmp_path):
+def test_panel_has_an_optional_number_field_with_the_three_quick_picks(tmp_path):
     app, mgr = make_app(tmp_path)
     srv = serve(app)
     try:
         h = get(srv.server_address[1], "/")[2]
-        assert 'name="count"' in h and 'id="collect-count"' in h and "Number of vacancies" in h and " required" in h
+        assert 'name="count"' in h and 'id="collect-count"' in h and "Number of vacancies (optional)" in h and " required" not in h.split('id="collect-count"')[1].split(">")[0]
         for n in (50, 100, 200):
             assert f'<option value="{n}">' in h
         assert mgr.status()["state"] == "idle" and "data-result-banner" not in h
@@ -222,7 +222,7 @@ def test_nothing_is_scraped_until_a_valid_number_is_submitted(tmp_path):
     app, mgr = make_app(tmp_path, runner=uni)
     srv = serve(app); port = srv.server_address[1]
     try:
-        for form in ({"scope": "india"}, {"scope": "india", "count": ""}, {"scope": "india", "count": "0"},
+        for form in ({"scope": "india", "count": "0"},
                      {"scope": "india", "count": "abc"}, {"scope": "india", "count": str(settings.COLLECTION_TARGET_MAX + 1)}):
             status, headers, _ = call(port, "POST", "/collection/run", form)
             assert status == 303 and headers["location"] == "/?notice=bad_count", form
@@ -297,8 +297,8 @@ def test_a_request_covers_the_last_24_hours_unless_another_window_is_chosen(tmp_
     mgr.start("india", 5, "7d")
     assert uni_cmds[len(PLACES)][uni_cmds[len(PLACES)].index("--days") + 1] == "7" and mgr.status()["window"] == "7d"
     assert not mgr.start("india", 5, "forever")[0]
-    mgr.start("india")                                            # no target: the configured collection window, as before
-    assert uni_cmds[-1][uni_cmds[-1].index("--days") + 1] == str(settings.COLLECTION_DAYS) and mgr.status()["window"] is None
+    mgr.start("india", None, "7d")                                # no number: the chosen period still applies
+    assert uni_cmds[-1][uni_cmds[-1].index("--days") + 1] == "7" and mgr.status()["window"] == "7d"
 
 
 def test_form_offers_the_window_with_24_hours_selected_and_refuses_unknown_ones(tmp_path):
@@ -331,3 +331,65 @@ def test_the_requested_vacancies_are_listed_most_recently_posted_first(tmp_path)
         assert order == sorted(order) and "Showing 1 to 3 of 3 vacancies" in h and "last 24 hours" in h
     finally:
         srv.shutdown(); srv.server_close()
+
+
+# ---- only GCC / BFSI openings ---------------------------------------------------------------------------------
+def shop(n):
+    return raw_job(n, title="Shop Assistant", company="Happy Shoes", industries="Retail", description="Sell shoes to walk-in customers.")
+
+
+def test_only_gcc_or_bfsi_postings_are_kept_and_the_count_is_still_met(tmp_path):
+    assert settings.COLLECTION_ONLY_GCC_BFSI is True
+    mixed = []
+    for i in range(1, 13):                       # newest first: two shop jobs for every bank job
+        mixed.append(raw_job(i) if i % 3 == 0 else shop(i))
+    mgr, hist, uni = run(tmp_path, {PLACES[0]: mixed}, 3)
+    st = mgr.status()
+    kept = {j["record"]["job_id"] for j in hist.list_jobs()}
+    assert kept == {str(7000000000 + i) for i in (3, 6, 9)}                  # three bank jobs; no shop job stored
+    assert st["collected_unique"] == 3 and st["stop_reason"] == "target_reached"
+    assert st["skipped_not_relevant"] >= 1 and "did not look like GCC or BFSI" in st["message"]
+    assert all(j["record"]["potential_bfsi"] or j["record"]["potential_gcc"] for j in hist.list_jobs())
+    assert len(uni.calls) > 1                                               # it searched again to make up the count
+    fetched_ids = [c["fetched"] for c in uni.calls]
+    assert sum(fetched_ids) <= 12                                           # a rejected posting is not fetched a second time
+
+
+def test_nothing_relevant_stores_nothing_and_never_looks_like_success(tmp_path):
+    mgr, hist, _ = run(tmp_path, {PLACES[0]: [shop(i) for i in range(1, 6)]}, 3)
+    st = mgr.status()
+    assert hist.list_jobs() == [] and st["collected_unique"] == 0 and st["stop_reason"] != "target_reached"
+    assert "Collected 0 of 3" in st["message"] and "did not look like GCC or BFSI" in st["message"]
+
+
+def test_the_gate_can_be_switched_off_and_existing_history_is_untouched(tmp_path):
+    settings.COLLECTION_ONLY_GCC_BFSI = False
+    try:
+        mgr, hist, _ = run(tmp_path, {PLACES[0]: [shop(1), shop(2), raw_job(3)]}, 3)
+        assert len(hist.list_jobs()) == 3 and mgr.status()["collected_unique"] == 3
+    finally:
+        settings.COLLECTION_ONLY_GCC_BFSI = True
+
+
+def test_old_history_jobs_that_fail_the_strict_rules_do_not_count_towards_the_requested_number(tmp_path):
+    """Saved under looser rules, hidden by the dashboard: they must not use up part of "N vacancies" (the page showed 2 of 10)."""
+    out = tmp_path / "out"; out.mkdir()
+    settings.COLLECTION_ONLY_GCC_BFSI = False                      # how they got into the history in the first place
+    try:
+        mgr, hist = make_manager(tmp_path, Universe(out, {PLACES[0]: [shop(1), shop(2), shop(3), raw_job(4)]}))
+        mgr.start("india", 4)
+    finally:
+        settings.COLLECTION_ONLY_GCC_BFSI = True
+    assert len(hist.list_jobs()) == 4
+    before = json.dumps(hist.list_jobs(), sort_keys=True, default=str)
+    listings = {PLACES[0]: [shop(1), shop(2), shop(3), raw_job(4)] + [raw_job(i) for i in range(5, 30)]}
+    uni = Universe(out, listings)
+    m2 = CollectionManager(hist, tmp_path, output_dir=out, runner=uni, now_fn=mgr.now, background=False)
+    m2.start("india", 3)
+    st = m2.status()
+    assert st["result_keys"] == [KEY(4), KEY(5), KEY(6)]            # the three newest QUALIFYING postings, not 1-3 (shop jobs)
+    assert st["collected_unique"] == 3 and st["stop_reason"] == "target_reached"
+    assert len(hist.list_jobs()) >= 6 and all(k in {e["key"] for e in hist.list_jobs()} for k in (KEY(1), KEY(2), KEY(3)))   # nothing deleted
+    from dashboard import viewmodel as vm
+    shown = vm.build_rows(hist.list_jobs(), {}, None, only_gcc_bfsi=True)
+    assert {r.key for r in shown if r.key in st["result_keys"]} == set(st["result_keys"])      # every counted vacancy is visible

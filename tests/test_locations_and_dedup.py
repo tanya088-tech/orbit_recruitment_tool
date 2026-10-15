@@ -60,10 +60,12 @@ def test_different_jobs_are_not_merged_and_same_source_id_dedup_still_works(tmp_
     h.ingest([make_record(1), make_record(2), make_record(3)], now=NOW + timedelta(hours=3))
     jobs = h.list_jobs()
     assert len(jobs) == 3 and {j["times_seen"] for j in jobs} == {1, 2}
-    # same title and company in two cities with no shared URL stay separate: no guessing
+    # same company and title but a different city, or a different title in the same city, stay separate: no guessing
     h2 = JsonJobHistory(tmp_path / "h2.json")
-    h2.ingest([make_record(1, source="A", job_url="https://a.example/1"), make_record(2, source="B", job_url="https://b.example/2")], now=NOW)
-    assert len(h2.list_jobs()) == 2
+    h2.ingest([make_record(1, source="A", job_url="https://a.example/1"),
+               make_record(2, source="B", job_url="https://b.example/2", location="Mumbai, Maharashtra, India"),
+               make_record(3, source="C", job_url="https://c.example/3", title="Treasury Analyst")], now=NOW)
+    assert len(h2.list_jobs()) == 3
 
 
 def test_first_and_last_seen_are_stored(tmp_path):

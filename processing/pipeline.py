@@ -49,7 +49,8 @@ class FilterRun:
 
 
 def evaluate_job(job: dict[str, Any], as_of: datetime, include_ambiguous_date: bool = False) -> EvaluatedJob:
-    cls = classify(job.get("company"), job.get("title"), job.get("description"), job.get("industries"))
+    cls = classify(job.get("company"), job.get("title"), job.get("description"), job.get("industries"),
+                   posted_by=job.get("posted_by"), company_url=job.get("company_url"))
     emp = map_employment_type(job.get("employment_type"))
     loc = check_location(job.get("location"))
     posted = evaluate_posting(job, as_of=as_of, include_ambiguous_date=include_ambiguous_date)
@@ -60,7 +61,7 @@ def evaluate_job(job: dict[str, Any], as_of: datetime, include_ambiguous_date: b
         "gcc_bfsi": {
             "passed": gcc_bfsi_ok,
             "code": "ok" if gcc_bfsi_ok else "not_gcc_or_bfsi",
-            "reason": cls.reason if gcc_bfsi_ok else "no potential GCC or BFSI signals found",
+            "reason": cls.reason,
         },
         "employment_type": {"passed": emp.passed, "code": emp.code, "reason": emp.reason},
         "india_location": {"passed": loc.is_india, "code": loc.code, "reason": loc.reason},
@@ -96,6 +97,19 @@ def evaluate_job(job: dict[str, Any], as_of: datetime, include_ambiguous_date: b
         # Detail-page fields. None unless the source actually provided them - never guessed.
         "designation": job.get("designation"),
         "job_role": job.get("job_role") or job.get("job_function"),
+        "experience": job.get("experience"),                # source-stated fields; None when the source gave nothing
+        "salary": job.get("salary"),
+        "skills": job.get("skills") or [],
+        "work_mode_text": job.get("work_mode_text"),
+        "openings": job.get("openings"),
+        "applicants": job.get("applicants"),
+        "education": job.get("education"),
+        "role_category": job.get("role_category"),
+        "posted_by": job.get("posted_by"),
+        "employment_details": job.get("employment_details"),
+        "company_website": job.get("company_website"),
+        "company_rating": job.get("company_rating"),
+        "company_reviews": job.get("company_reviews"),
         "experience_requirements": (job.get("raw") or {}).get("experience_requirements"),   # JSON-LD only; None when the page has none
         "education_requirements": (job.get("raw") or {}).get("education_requirements"),
         "recruiter_name": job.get("recruiter_name"),
@@ -193,6 +207,34 @@ class NormalizedRun:
     summary: dict[str, Any] = field(default_factory=dict)
 
 
+def keep_eligible(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The GCC/BFSI gate every source goes through before a job can reach the history or the dashboard.
+
+    A normalized record is kept only if the strict rules (processing/classifier.py) tagged it GCC and/or BFSI.
+    Returns (kept, dropped). Same function for LinkedIn and Naukri.
+    """
+    kept = [r for r in records if r.get("potential_gcc") or r.get("potential_bfsi")]
+    dropped = [r for r in records if not (r.get("potential_gcc") or r.get("potential_bfsi"))]
+    return kept, dropped
+
+
+def location_in_scope(country: Optional[str], scope: str) -> bool:
+    """Collection location scope. india: the job's own location is confidently India. international: confidently another
+    country. A missing, unrecognised or two-country location (country None) qualifies for neither. Other scopes: no check."""
+    if scope == "india":
+        return country == "India"
+    if scope == "international":
+        return bool(country) and country != "India"
+    return True
+
+
+def keep_in_scope(records: list[dict[str, Any]], scope: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(kept, dropped) of normalized records for a collection scope. Uses the record's own location-derived country."""
+    kept = [r for r in records if location_in_scope(r.get("country"), scope)]
+    dropped = [r for r in records if not location_in_scope(r.get("country"), scope)]
+    return kept, dropped
+
+
 def normalize_all(jobs: list[dict[str, Any]], as_of: Optional[datetime] = None) -> NormalizedRun:
     """Run the same Phase 2 normalization/classification on every job and keep them all.
 
@@ -223,7 +265,7 @@ def normalize_all(jobs: list[dict[str, Any]], as_of: Optional[datetime] = None) 
         "notes": [
             "No job was removed. Filtering (location, posted date, GCC/BFSI, job type) happens in the dashboard.",
             "GCC/BFSI is a keyword-based POTENTIAL classification, not a confirmation.",
-            "first_seen_at is the Phase 1 collected_at; the history store records when Orbit first found each job.",
+            "first_seen_at is the Phase 1 collected_at; the history store records when the tool first found each job.",
         ],
     }
     return run

@@ -43,6 +43,16 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+# --- Naukri: pages that only exist after JavaScript runs are read with a real browser engine (Playwright) ---
+BROWSER_HEADLESS = False                      # Naukri refuses a window-less (headless) browser with HTTP 403. A normal visible window is used
+                                              # for collection; do not close it while a run is going. True = no window (expect 403 from those sites)
+BROWSER_MINIMIZE_WINDOW = True                # the collection browser is still a normal window (Naukri needs one) but starts minimized so it does not
+                                              # cover your screen. False = show it. If Naukri results ever stop loading, set this to False.
+BROWSER_SHARED_ACROSS_PLACES = True            # one browser window for the whole collection run instead of one per place (much faster)
+BROWSER_SOURCES = ("naukri",)                  # sources that read pages with the browser
+BROWSER_PROFILE_DIR = BASE_DIR / "data" / "browser_profile"   # cookies stay here between runs, like a normal browser profile
+BROWSER_WAIT_MS = 15000                       # how long to wait for a page's job list / description to appear
+
 # --- Phase 3: dashboard & history ---
 DATA_DIR = BASE_DIR / "data"                 # job_history.json + recruiter_state.json live here
 DEMO_DATA_DIR = BASE_DIR / "data_demo"       # synthetic data for trying the UI (never mixed with real data)
@@ -64,5 +74,23 @@ COLLECTION_TARGET_CHOICES = (50, 100, 200)       # quick picks offered next to t
 COLLECTION_WINDOWS = {"24h": (1, "Last 24 hours"), "3d": (3, "Last 3 days"), "7d": (7, "Last 7 days"), "30d": (30, "Last 30 days")}
 COLLECTION_DEFAULT_WINDOW = "24h"                 # a "N vacancies" request means the N most recent from the last 24 hours unless changed
 COLLECTION_TARGET_MAX = 1000                      # the largest number a recruiter can ask for in one run
+COLLECTION_STRICT_WINDOW = True                  # while collecting, drop postings whose own date shows they are older than the 'posted within' choice
+COLLECTION_CANDIDATE_POOL_FACTOR = 2                # with a target N, gather up to N x this many newest candidates, then keep the best N (1 = exactly N)
+COLLECTION_RECENCY_TOLERANCE_HOURS = 1            # postings within the same window of this many hours count as 'similar recency'
+COLLECTION_PARALLEL_SOURCES = True               # search LinkedIn and Naukri at the same time (different sites, each keeps its own pacing)
 COLLECTION_ROUNDS_PER_PLACE = 4                   # extra passes over one place when a pass added fewer unique vacancies than it fetched
+SUPPORTED_SOURCES = ("LinkedIn", "Naukri")   # shown in the Source filter and the collection form even before a source has any jobs
+COLLECTION_DEFAULT_SOURCES = ("LinkedIn",)        # sources ticked in the collection form until the recruiter chooses
 COLLECTION_SKIP_KNOWN_IDS = True                  # do not re-fetch detail pages for jobs already in the history
+
+# Shown in the dashboard when a source blocks the tool (source name -> extra advice). Empty: the default message is used.
+SOURCE_BLOCK_ADVICE: dict = {}
+SOURCE_FORM_NOTES: dict = {}
+
+# Keep only postings whose company/title/description/industry look like GCC or BFSI (the same keyword rules that set the
+# "potential GCC / potential BFSI" tags). Others are not added to the history by dashboard collections. False = keep everything.
+COLLECTION_ONLY_GCC_BFSI = True
+
+# The dashboard lists only vacancies that pass the strict GCC/BFSI rules (processing/classifier.py), judged again every time the
+# page is built - so older history saved under looser rules is hidden, never deleted. False = show everything in the history.
+DISPLAY_ONLY_GCC_BFSI = True

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from collectors.base import JobSource
-from collectors.errors import BlockedError
+from collectors.errors import BlockedError, SetupError
 from models.job import Job, RunStats, SearchParams
 
 log = logging.getLogger(__name__)
@@ -45,6 +45,10 @@ class Collector:
                         if job.job_id:
                             seen_ids.add(job.job_id)
                         result.jobs.append(job)
+                except SetupError as exc:
+                    result.stats.setup_error = str(exc)
+                    log.error("SETUP REQUIRED: %s", exc)
+                    break
                 except BlockedError as exc:
                     result.stats.blocked = True
                     log.error("SOURCE BLOCKED US - stopping run. Reason: %s", exc)

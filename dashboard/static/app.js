@@ -16,6 +16,7 @@ document.querySelectorAll('[data-autosubmit]').forEach(function (el) {
         set('[data-count-collected]', String(st.collected_unique || 0));
         set('[data-count-new]', String(st.new_added || 0));
         set('[data-count-had]', String(st.already_had || 0));
+        set('[data-count-rejected]', String((st.skipped_not_relevant || 0) + (st.skipped_out_of_scope || 0)));
         var bar = panel.querySelector('[data-collect-bar]');
         if (bar) { bar.max = Math.max(st.search_total || 1, 1); bar.value = st.search_done || 0; }
         if (st.search_total) {
@@ -27,17 +28,20 @@ document.querySelectorAll('[data-autosubmit]').forEach(function (el) {
     window.setInterval(tick, 3000);
   }
   // Restart page: wait until the new process answers, then open the dashboard.
-  if (document.querySelector('[data-restart-poll]') && window.fetch) {
+  var restartBox = document.querySelector('[data-restart-poll]');
+  if (restartBox && window.fetch) {
     var tries = 0;
+    var oldBoot = restartBox.getAttribute('data-boot') || '';
     var wait = window.setInterval(function () {
       tries += 1;
-      fetch('/healthz', { cache: 'no-store' }).then(function (r) {
-        if (r.ok && tries > 2) { window.clearInterval(wait); window.location.href = '/'; }
+      // open the dashboard only once a DIFFERENT process answers (the old one keeps answering for a moment)
+      fetch('/app/boot', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (b) {
+        if (b && b.boot && b.boot !== oldBoot) { window.clearInterval(wait); window.location.href = '/'; }
       }).catch(function () {});
       if (tries > 40) {
         window.clearInterval(wait);
         var t = document.querySelector('[data-restart-text]');
-        if (t) t.textContent = 'The app did not come back. Close this window and open Orbit Job Radar again from the launcher.';
+        if (t) t.textContent = 'The app did not come back. Close this window and open Ace Talent Consulting Job Radar again from the launcher.';
       }
     }, 1500);
   }

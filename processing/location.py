@@ -52,6 +52,10 @@ def check_location(location: Optional[str]) -> LocationResult:
     fully_remote = bool(_FULLY_REMOTE.search(norm))
 
     if _INDIA_WORD.search(norm) or _COUNTRY_CODE_IN.search(raw):
+        foreign = _FOREIGN_COUNTRY.search(norm)
+        if foreign:           # e.g. "Pune, India / Dubai": the posting names two countries, so it is neither India nor outside India
+            return LocationResult(False, None, "location_ambiguous",
+                                  f"location '{raw}' names India and {_pretty(foreign.group(0))}: ambiguous", remote, fully_remote)
         return LocationResult(True, "India", "ok", f"'{raw}' is in India", remote, fully_remote)
 
     # Country is normally the LAST part of a LinkedIn location, so take the last country match.

@@ -99,7 +99,7 @@ re-reads the date from the saved card HTML.
 `config/filter_rules.py` (editable rule lists) · `processing/` (`classifier`, `employment`, `location`,
 `posted`, `pipeline`) · `run_filter.py` · tests `test_classifier/employment/location/posted/pipeline.py`
 
-## Phase 3 - Orbit Recruiter Dashboard
+## Phase 3 - Ace Talent Consulting Recruiter Dashboard
 
 Data flow
 ```
@@ -137,7 +137,7 @@ and still writes `filtered_jobs_*.json`, but the dashboard no longer depends on 
 ## Dashboard update - launcher, collection from the dashboard, pan-India and international scope
 
 ### Start it without typing commands
-Double-click **`Orbit Job Radar.command`** in this folder. A Terminal window opens (leave it open while you work) and the
+Double-click **`Ace Talent Consulting Job Radar.command`** in this folder. A Terminal window opens (leave it open while you work) and the
 dashboard opens in your browser. Closing that window stops the app. The first time, macOS may refuse to open it:
 right-click the file, choose **Open**, then **Open** again. If the app is already running, double-clicking only opens the browser.
 
@@ -145,7 +145,7 @@ right-click the file, choose **Open**, then **Open** again. If the app is alread
 * **Run job collection** - pick *India only*, *India and international* or *International only*. It runs the unchanged
   `run_collect.py` in the background, then normalizes and adds the jobs to the history (duplicates are skipped).
   The panel shows progress (search N of M), the last successful run, and any error. Only one collection can run at a time
-  (a second click, a second browser tab or a second Orbit window is refused).
+  (a second click, a second browser tab or a second Ace Talent Consulting window is refused).
 * **Refresh dashboard** - reloads the list. (It also reloads by itself when a collection finishes.)
 * **Restart app** - restarts the dashboard process. Refused while a collection is running.
 * Demo mode (`--demo`) has collection turned off.
@@ -210,4 +210,75 @@ exactly those N vacancies, with a banner and a *Show all collected jobs* link; n
 Places are searched in the usual order and later places are used only if the earlier ones had fewer than N.
 The panel shows Requested, Collected (unique), New to history, Already collected and a status: *Target reached*,
 *Results exhausted* (fewer exist than requested; the message gives the real count), or *Could not continue*
-(source refusal, interruption, time limit). Requests stay sequential with the same delays. Only LinkedIn is implemented.
+(source refusal, interruption, time limit). Requests stay sequential with the same delays. LinkedIn, Naukri and Indeed are implemented (next section).
+
+## Sources: LinkedIn and Naukri (Indeed was removed)
+
+The collection panel has a **Sources** tick-box per source (LinkedIn is ticked by default). Each ticked source is collected on its own,
+place by place, with the same delays, then normalized and added to the history. With a vacancy count N, every ticked source is asked
+for its N most recent postings, the lists are merged (an opening listed twice counts once) and the N most recently posted are shown.
+The **Source** filter lists LinkedIn, Naukri and Indeed (one at a time, as before); a vacancy that is on several sources appears under each,
+and its **Source** column and details page list every source with its link ("Also listed on").
+
+**One-time setup for Naukri and Indeed.** Both build their pages with JavaScript, so they are read through a real browser engine:
+`pip install -r requirements.txt` then `playwright install chromium`. Until then those sources report "could not run: browser support is
+not installed" and LinkedIn is unaffected. Check them on your Mac before relying on them: `python verify_sources.py` (add `--visible`
+to watch the browser). It reads one search page and one job page per source and prints every field it found or could not find.
+
+**Duplicates across sources.** The same real URL, or the same company + title + city appearing on a *different* source, is stored as one
+vacancy; the first-collected record stays the primary one, missing fields are filled from the other source, and the other source's id and
+link are kept. Two postings from the *same* source are never merged by this rule. It is a heuristic: if two different openings share
+company, title and city on different sites they will show as one row (both links are kept).
+
+**Limits you should know about** (nothing here is bypassed):
+* The tool never solves CAPTCHAs, logs in, or works around a security check. If Naukri or Indeed shows one, that source stops, what was
+  collected is kept, and the panel says so. Indeed in particular shows a "Security Check" to automated visitors; its job pages may
+  not be retrievable from your network, in which case Indeed returns nothing rather than partial data. Both sites' terms restrict automated access.
+* Indeed's result cards carry no posting date; The tool shows the date only when the job page states one, otherwise "Not available".
+  Indeed's date filter supports 1, 3, 7 and 14 days (longer windows are capped at 14).
+* Naukri's visible experience (e.g. "0 - 2 years") is used; the machine-readable `monthsOfExperience` in its page data is ignored because it is
+  wrong for most postings. "Not disclosed" salaries are stored as missing, not as a salary.
+* "Show more / View more" buttons are clicked before a Naukri or Indeed page is read. LinkedIn's public page already contains the
+  whole description, so no click is needed there.
+* The Indeed job-page selectors could not be checked against a live page from the build environment (the security check appeared), so
+  they are covered by tests on a fixture of Indeed's markup only. Run `verify_sources.py` to confirm on your machine.
+
+**Naukri/Indeed browser window.** These sources run in a normal, visible browser window (`BROWSER_HEADLESS = False` in
+`config/settings.py`) because they answer a window-less browser with HTTP 403 "Access Denied". A window opens during
+collection; leave it alone until the run ends, and do not run `verify_sources.py` at the same time (they share one
+browser profile). Naukri is searched one keyword at a time ("GCC OR bank OR financial services" = three searches):
+a comma list makes Naukri drop the freshness filter. If a source answers 403 or shows a security check, the dashboard
+says which source, the status and what the page said, does not retry, and continues with the other ticked sources.
+
+## Indeed removed; company website; posted-time wording
+
+* **Indeed** is no longer a source (its security check refuses automated browsers). Its code is parked, unused, in `retired/`.
+  Existing history is untouched. LinkedIn and Naukri are the only sources in the collection form, filter and Source column.
+* **Company website** (details page, Vacancy group). Shown only when a source states it: Naukri's "About the company" website link.
+  LinkedIn's public pages never give one, so a LinkedIn job shows the website only if another listing of the exact same company
+  name stated one and all such listings agree (it says "Taken from another listing of this company"). Otherwise the cell is blank.
+  Confidential employers never borrow a website. Websites are stored from the next Naukri collection onward.
+* **Posted time** reads the same for both sources: "Just now" or "N hours ago" inside 24 hours, then "1 day ago", "2 days ago"...
+  It is worked out from the posting time when there is one (exact, or estimated from the source's "5 hours ago"). When a source gives only
+  a date, whole days are counted and today's date shows "Today", because no hour can be known.
+
+## GCC / BFSI only
+
+Dashboard collections now keep only postings that look like GCC or BFSI openings (the same keyword rules that set the
+"potential GCC / BFSI" tags: company, title, description and industry). Postings that match neither are fetched, judged and
+**not added** to the history; the status message says how many were skipped. With a vacancy count N the collector keeps searching
+(up to the usual rounds per place) until it has N relevant postings or runs out, and a rejected posting is not fetched twice in a run.
+This is a keyword indication, not a confirmed classification, so an opening with unusual wording can be missed. Existing history is not
+touched. To keep everything again set `COLLECTION_ONLY_GCC_BFSI = False` in `config/settings.py`.
+
+
+## Strict GCC / BFSI filtering (LinkedIn and Naukri)
+
+Only GCC or BFSI vacancies are collected and shown. The same rules (`processing/classifier.py`, word lists in `config/filter_rules.py`) run for every source:
+
+* **BFSI** - the employer's industry (LinkedIn "Industries" / Naukri "Industry Type") is banking, financial services, insurance, lending, payments, capital markets, investment, wealth etc.; or the company name says so (and no different industry is stated); or the job title is specific BFSI work (underwriter, actuary, KYC/AML, credit risk, investment banking ...) at an employer not stated to be in another industry.
+* **GCC** - the company name or the posting describes the employer as a Global Capability / Global In-house / captive / shared-services / Global Business Services centre, or a technology/delivery centre of a multinational group.
+* **Never enough on their own:** words such as HR, recruiter, talent acquisition, manager, analyst, operations, technology, finance - in the title or description. An HR role at a confirmed GCC/BFSI employer is kept; the same role elsewhere is not.
+* **Never eligible:** recruitment/staffing employers, agency postings ("hiring for our client"), unnamed ("Confidential") employers, and anything without clear evidence.
+
+The check runs when a job is collected (before it is saved) and again whenever the dashboard is built, so older history saved under looser rules is hidden without being deleted (`DISPLAY_ONLY_GCC_BFSI` in `config/settings.py`; `python check_history.py` shows what is hidden and why - it changes nothing).

@@ -29,9 +29,9 @@ def test_kpis_over_http_follow_the_selected_filters(tmp_path):
         h = get(port, "/")[2]
         assert [fig(h, x) for x in labels] == [3, 2, 1]
         assert h.count('class="fig"') == 3                                   # only three cards
-        h = get(port, "/?posted=3d")[2]
-        assert [fig(h, x) for x in labels] == [2, 1, 1]
-        h = get(port, "/?posted=3d&employment=Contract")[2]
+        h = get(port, "/?employment=Permanent")[2]
+        assert [fig(h, x) for x in labels] == [2, 2, 0]
+        h = get(port, "/?employment=Contract")[2]
         assert [fig(h, x) for x in labels] == [1, 0, 1]
 
 
@@ -149,16 +149,17 @@ def test_details_page_sections_and_complete_description(tmp_path):
 def test_contact_information_shown_when_present_and_not_available_when_absent(tmp_path):
     with_contact = make_record(3002, "With contact", recruiter_name="A. Recruiter", recruiter_email="a.recruiter@acme.example",
                                recruiter_phone="+91 99999 00000", contact_url="https://www.linkedin.com/in/a-recruiter")
-    without = make_record(3003, "Without contact")
+    without = make_record(3003, "Without contact", company="Lonely Co")
     hostile = make_record(3004, "Hostile contact", recruiter_email="<script>x</script>", contact_url="javascript:alert(1)", recruiter_name="<b>N</b>")
     with running(tmp_path, records=[with_contact, without, hostile], second_run=[]) as (port, _):
         h = get(port, "/job/linkedin-3002")[2]
         assert "A. Recruiter" in h and "+91 99999 00000" in h
         assert 'href="mailto:a.recruiter@acme.example"' in h and 'href="https://www.linkedin.com/in/a-recruiter"' in h
-        assert "Not available" not in h[h.index("Recruiter and contact</th>"):h.index("</table>")]
+        sect = h[h.index("Recruiter and contact</th>"):h.index("</table>")]
+        assert sect.count("Not available") == 1 and "LinkedIn profile" in sect       # only the Contact URL is empty; the profile link is shown
         h = get(port, "/job/linkedin-3003")[2]
         section = h[h.index("Recruiter and contact</th>"):h.index("</table>")]
-        assert section.count("Not available") == 4 and "mailto:" not in section and "@" not in section      # nothing invented
+        assert section.count("Not available") == 5 and "mailto:" not in section and "@" not in section      # nothing invented
         h = get(port, "/job/linkedin-3004")[2]
         assert "<script>x" not in h and "&lt;script&gt;x&lt;/script&gt;" in h and 'href="javascript:' not in h and "mailto:" not in h
 

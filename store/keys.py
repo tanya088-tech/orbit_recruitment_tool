@@ -73,3 +73,26 @@ def match_url(record: dict[str, Any]) -> Optional[str]:
     if not path or path.lower() in ("jobs", "search", "careers", "jobs/search"):
         return None
     return url
+
+
+def _norm(text: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+_COMPANY_NOISE = re.compile(r"\b(pvt|private|ltd|limited|inc|llp|llc|corp|corporation|india|co)\b")
+
+
+def vacancy_fingerprint(record: dict[str, Any]) -> Optional[str]:
+    """company + title + city, normalised. Used ONLY to recognise the same opening listed on two DIFFERENT sources.
+
+    All three parts must be present, otherwise None (never match on partial information). It is a heuristic:
+    two genuinely separate openings with identical company, title and city on different sites are merged into one
+    row, and both source links are kept on that row so nothing is lost.
+    """
+    company = _COMPANY_NOISE.sub(" ", _norm(record.get("company")))
+    company = " ".join(company.split())
+    title = _norm(record.get("title"))
+    city = _norm(str(record.get("location") or "").split(",")[0].split("(")[0])
+    if not (company and title and city) or city in ("india", "remote"):
+        return None
+    return f"{company}|{title}|{city}"

@@ -32,8 +32,10 @@ NOTICES = {
     "started": "Collection started. This page updates while it runs.",
     "already": "A collection is already running. Wait for it to finish before starting another.",
     "bad": "That collection option is not available.",
-    "bad_count": "Enter how many vacancies to collect: a whole number from 1 to {max}.",
+    "bad_source": "Tick at least one source to collect from.",
+    "bad_count": "The number of vacancies must be a whole number from 1 to {max}, or left blank to collect all eligible vacancies.",
     "disabled": "Collection is turned off in demo mode.",
+    "saved": "Showing the saved vacancies that match. No new search was run.",
     "restart_blocked": "The app cannot restart while a collection is running.",
 }
 
@@ -84,11 +86,11 @@ def shell(title: str, body: str, run: Optional[dict], now: datetime, banner: Opt
     banner_html = f'<div class="banner">{esc(banner)}</div>' if banner else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{esc(title)} - Orbit Job Radar</title>
+<title>{esc(title)} - Ace Talent Consulting Job Radar</title>
 <link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
 <body>
 <header class="topbar"><div class="topbar-inner">
-  <a class="brand" href="/"><span class="logo"></span>Orbit <small>Job Radar</small></a>
+  <a class="brand" href="/"><span class="logo"></span>Ace Talent Consulting <small>Job Radar</small></a>
   <div class="topbar-right"><div class="runinfo">{runinfo}</div>{_powered_by()}</div>
 </div></header>
 {banner_html}
@@ -99,6 +101,13 @@ def shell(title: str, body: str, run: Optional[dict], now: datetime, banner: Opt
 
 # ---------------------------------------------------------------- page 1
 def _select(name: str, label: str, options: list[tuple[str, str]], current: str) -> str:
+    """The dropdown always shows exactly what is applied: a value that is not in the list (or differs only in case)
+    is shown rather than silently falling back to the first option."""
+    match = next((v for v, _ in options if v.lower() == current.lower()), None) if current else ""
+    if match is None:
+        options = options + [(current, current)]
+    elif match != current:
+        current = match
     opts = "".join(
         f'<option value="{esc(v)}"{" selected" if v == current else ""}>{esc(t)}</option>' for v, t in options)
     return (f'<div class="field"><label for="f-{name}">{esc(label)}</label>'
@@ -108,18 +117,18 @@ def _select(name: str, label: str, options: list[tuple[str, str]], current: str)
 def _filters_form(f: Filters, options: dict[str, list[str]]) -> str:
     scope = _select("scope", "Location scope", [(k, vm.SCOPE_LABELS[k]) for k in vm.SCOPE_OPTIONS], f.scope)
     emp = _select("employment", "Employment type", [(k, vm.EMPLOYMENT_LABELS[k]) for k in vm.EMPLOYMENT_OPTIONS], f.employment)
-    source = _select("source", "Source", [("", "All")] + [(x, x) for x in options["sources"]], f.source)
-    posted = _select("posted", "Job posted", [(k, vm.POSTED_LABELS[k]) for k in vm.POSTED_OPTIONS], f.posted)
+    state = _select("state", "State", [("", "All states")] + [(x, x) for x in options.get("states", [])], f.state)
+    contact = _select("contact", "Contact Details Available", [(k, vm.CONTACT_LABELS[k]) for k in vm.CONTACT_OPTIONS], f.contact)
     mode = _select("work_mode", "Work mode", [(k, vm.WORK_MODE_LABELS[k]) for k in vm.WORK_MODE_OPTIONS], f.work_mode)
     sort = _select("sort", "Sort by", list(vm.SORT_LABELS.items()), f.sort)
     return f"""
-<form class="filters" method="get" action="/">
+<form class="filters" method="get" action="/" autocomplete="off">
   {'<input type="hidden" name="view" value="all">' if f.view == "all" else ""}
   <div class="filter-grid">
-    {scope}{emp}{source}
-    {posted}{mode}{sort}
+    {scope}{state}{emp}
+    {mode}{contact}{sort}
     <div class="filter-actions"><button class="btn btn-primary" type="submit">Apply filters</button>
-      <a class="btn btn-quiet" href="/">Clear all</a></div>
+      <a class="btn btn-reset" href="/" role="button" data-reset-filters title="Back to the default view: Within India, all states, no sorting or page">Reset filters</a></div>
   </div>
 </form>"""
 
@@ -145,17 +154,39 @@ def _row_html(r: Row, f: Filters, now: datetime, here: str) -> str:
 <td class="c-flag">{'<span class="badge-new">New</span>' if r.is_new else ''}</td>
 <td class="c-title"><a class="job-link" href="{esc(detail_href(r.key, f))}">{esc(r.display_title) if r.title else na("Untitled vacancy")}</a>{('<div>' + chip + '</div>') if chip else ''}</td>
 <td>{or_na(r.company)}</td>
+<td class="c-reviews">{esc(vm.format_company_reviews(r.company_rating, r.company_reviews))}</td>
 <td>{or_na(r.location)}</td>
 <td>{_industry_cell(r)}</td>
 <td>{or_na(r.employment_type)}</td>
 <td class="c-posted">{ring_html(r.posted, now)}<span class="{hot.strip()}">{esc(vm.format_age(r.posted, now))}</span>{f'<div class="sub">{esc(precision)}</div>' if precision else ''}</td>
-<td>{or_na(r.source)}</td>
+<td>{or_na(", ".join(r.all_sources))}</td>
 <td class="c-act">
   <form class="inline" method="post" action="/job/{esc(quote(r.key))}/save">
     <input type="hidden" name="saved" value="{0 if r.saved else 1}"><input type="hidden" name="next" value="{esc(here)}">
     <button class="star{star_on}" type="submit" aria-label="{'Remove from saved jobs' if r.saved else 'Save job'}" title="{'Saved. Click to remove' if r.saved else 'Save job'}">{'&#9733;' if r.saved else '&#9734;'}</button></form>
   <a class="btn btn-sm" href="{esc(detail_href(r.key, f))}">View details</a></td>
 </tr>"""
+
+
+def _contact_rows(r: Row) -> list[str]:
+    """The 'Recruiter and contact' block: only what the posting itself states."""
+    phones = ", ".join(esc(p) for p in r.contact_phones) or or_na(None)
+    emails = ", ".join(f'<a href="mailto:{esc(e)}">{esc(e)}</a>' if _EMAIL.match(e) else esc(e) for e in r.contact_emails) or or_na(None)
+    urls = "<br>".join(f'<a href="{esc(u)}" target="_blank" rel="noopener noreferrer">{esc(u)}</a>' for u in r.contact_urls) or or_na(None)
+    li_url = vm.safe_http_url(r.contact_linkedin)
+    li = (f'<a href="{esc(li_url)}" target="_blank" rel="noopener noreferrer">{esc(li_url)}</a>'
+          '<span class="sub">Written in the posting</span>') if li_url else or_na(None)
+    by = (f'<span class="sub">Posted by {esc(r.posted_by)}</span>' if r.posted_by else "")
+    if r.contact_direct:
+        tag = ('<span class="tag tag-contact">Contact directly available</span>'
+               '<span class="sub">Copied from the posting itself, word for word. Nothing was looked up elsewhere.</span>')
+    else:
+        tag = ('<span class="tag tag-nocontact">Contact not directly fetched</span>'
+               '<span class="sub">This posting states no phone number, e-mail address or LinkedIn profile for the poster.</span>')
+    rows = [_group("Recruiter and contact"), _row("Contact status", tag),
+            _row("Recruiter / contact name", or_na(r.recruiter_name) + by),
+            _row("Phone number", phones), _row("Email", emails), _row("LinkedIn profile", li), _row("Contact URL", urls)]
+    return rows
 
 
 def _industry_cell(r: Row) -> str:
@@ -181,16 +212,38 @@ _STOP_LABELS = {"target_reached": "Target reached", "exhausted": "Results exhaus
 def _counts_html(st: dict[str, Any]) -> str:
     """Requested number, unique vacancies collected and the outcome of the run that asked for a number."""
     target = st.get("target")
-    if not target:
-        return ""
     state = st.get("state")
+    if not target and not (st.get("window") and state in ("running", "succeeded", "partial")):
+        return ""
     outcome = "Running" if state == "running" else _STOP_LABELS.get(st.get("stop_reason") or "", "Finished")
-    return ('<p class="collect-counts" data-collect-counts>'
-            f'<span>Requested: <b data-count-requested>{int(target)}</b></span>'
-            f'<span>Collected (unique): <b data-count-collected>{int(st.get("collected_unique") or 0)}</b></span>'
+    if target:
+        first = (f'<span>Requested: <b data-count-requested>{int(target)}</b></span>'
+                 f'<span>Collected (unique): <b data-count-collected>{int(st.get("collected_unique") or 0)}</b></span>')
+    else:   # no number entered: every eligible vacancy is collected, so there is no target to compare with
+        first = ('<span>Mode: <b data-count-mode>All eligible vacancies (within search limits)</b></span>'
+                 f'<span>Collected (unique): <b data-count-collected>{int(st.get("collected_unique") or 0)}</b></span>')
+    return ('<p class="collect-counts" data-collect-counts>' + first + ''
+
             f'<span>New to history: <b data-count-new>{int(st.get("new_added") or 0)}</b></span>'
             f'<span>Already collected: <b data-count-had>{int(st.get("already_had") or 0)}</b></span>'
-            f'<span>Status: <b data-count-status>{esc(outcome)}</b></span></p>')
+            f'<span>Rejected (not counted): <b data-count-rejected>{int(st.get("skipped_not_relevant") or 0) + int(st.get("skipped_out_of_scope") or 0)}</b></span>'
+            f'<span>Status: <b data-count-status>{esc(outcome)}</b></span></p>' + _per_source_html(st))
+
+
+def _per_source_html(st: dict[str, Any]) -> str:
+    """One line per source: what each found, what it contributed to the list, and what the rules turned away."""
+    ps = st.get("per_source") or {}
+    if len(ps) < 2:
+        return ""
+    items = []
+    for name, c in ps.items():
+        got = (f'{int(c.get("in_result") or 0)} in your list, ' if c.get("in_result") is not None
+               else f'{int(c.get("new") or 0) + int(c.get("existing") or 0)} collected, ')
+        total = int(c.get("found") or 0) + int(c.get("already") or 0)
+        known = f" ({int(c['already'])} already in your history)" if c.get("already") else ""
+        items.append(f'<li><b>{esc(name)}</b>: {total} found{known}, {got}'
+                     f'{int(c.get("not_relevant") or 0)} not GCC/BFSI, {int(c.get("out_of_scope") or 0)} outside the location scope</li>')
+    return f'<ul class="collect-persource" data-collect-persource aria-label="Results by source">{"".join(items)}</ul>'
 
 
 def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, notice: str = "") -> str:
@@ -223,10 +276,31 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
         warnings = ("<details class=\"collect-log\"><summary>Details</summary>"
                     + (f"<p class=\"sub\">Problems reported by the collector:</p><ul>{items}</ul>" if items else "")
                     + (f"<pre>{esc(tail)}</pre>" if tail else "") + "</details>")
+    # the form shows what the last run used (scope, window, number), so it never disagrees with the status above it
+    chosen_scope = st.get("scope") if st.get("scope") in loc_config.SCOPES else cv["default_scope"]
+    chosen_window = st.get("window") if st.get("window") in settings.COLLECTION_WINDOWS else settings.COLLECTION_DEFAULT_WINDOW
+    chosen_sources = [s for s in (st.get("sources") or settings.COLLECTION_DEFAULT_SOURCES) if s in settings.SUPPORTED_SOURCES]
+    count_value = int(st["target"]) if st.get("target") else ""
     scope_opts = "".join(
-        f'<option value="{esc(k)}"{" selected" if k == cv["default_scope"] else ""}>{esc(v)}</option>'
+        f'<option value="{esc(k)}"{" selected" if k == chosen_scope else ""}>{esc(v)}</option>'
         for k, v in loc_config.SCOPES.items())
     disabled = " disabled" if (running or not enabled) else ""
+    disabled_attr = disabled
+    source_boxes = "".join(
+        f'<label class="check"><input type="checkbox" name="source" value="{esc(s)}"'
+        f'{" checked" if s in chosen_sources else ""}{disabled_attr}> {esc(s)}'
+        + (f' <span class="sub">({esc(settings.SOURCE_FORM_NOTES[s])})</span>' if s in settings.SOURCE_FORM_NOTES else "")
+        + '</label>' for s in settings.SUPPORTED_SOURCES)
+    ff = st.get("fetch_filters") or {}
+    def _fsel(name: str, label: str, opts: list) -> str:
+        default = "yes" if (name == "contact" and not ff) else opts[0][0]       # vacancies with the poster's contact details first choice
+        o = "".join(f'<option value="{esc(v)}"{" selected" if v == ff.get(name, default) else ""}>{esc(t)}</option>' for v, t in opts)
+        return f'<div class="field"><label for="c-{name}">{esc(label)}</label><select id="c-{name}" name="f_{name}"{disabled}>{o}</select></div>'
+    fetch_selects = (_fsel("state", "State", [("", "All states")] + [(x, x) for x in vm.all_indian_states()])
+                     + _fsel("employment", "Employment type", [(k, vm.EMPLOYMENT_LABELS[k]) for k in vm.EMPLOYMENT_OPTIONS])
+                     + _fsel("work_mode", "Work mode", [(k, vm.WORK_MODE_LABELS[k]) for k in vm.WORK_MODE_OPTIONS])
+                     + _fsel("contact", "Contact Details Available", [(k, vm.CONTACT_LABELS[k]) for k in vm.CONTACT_OPTIONS]))
+    gate_note = ('<p class="sub">Only openings that look like GCC or BFSI are kept.</p>' if settings.COLLECTION_ONLY_GCC_BFSI else "")
     off = ('<p class="sub">Collection is turned off in demo mode.</p>' if not enabled else "")
     return f"""
 <section class="panel collect" aria-label="Job collection" data-collect-poll="{1 if running else 0}">
@@ -244,14 +318,23 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
     <form method="post" action="/collection/run" class="collect-run">
       <label for="collect-scope">Where to collect</label>
       <select id="collect-scope" name="scope"{disabled}>{scope_opts}</select>
+      <span class="sub">Where the tool searches, and which job locations it keeps. The Location scope filter below only changes what is shown.</span>
+      <input type="hidden" name="sources_sent" value="1">
+      <fieldset class="collect-sources"{disabled}><legend>Sources</legend>{source_boxes}</fieldset>
+      {gate_note}
       <label for="collect-window">Posted within</label>
-      <select id="collect-window" name="window"{disabled}>{"".join(f'<option value="{k}"{" selected" if k == settings.COLLECTION_DEFAULT_WINDOW else ""}>{esc(v[1])}</option>' for k, v in settings.COLLECTION_WINDOWS.items())}</select>
-      <label for="collect-count">Number of vacancies</label>
+      <select id="collect-window" name="window"{disabled}>{"".join(f'<option value="{k}"{" selected" if k == chosen_window else ""}>{esc(v[1])}</option>' for k, v in settings.COLLECTION_WINDOWS.items())}</select>
+      <fieldset class="collect-filters"{disabled}><legend>Only collect vacancies that match</legend>
+        {fetch_selects}
+        <span class="sub">Same filters as the list below, applied while fetching, so the vacancies collected already match them.</span>
+      </fieldset>
+      <label for="collect-count">Number of vacancies (optional)</label>
       <input id="collect-count" name="count" type="number" inputmode="numeric" min="1" max="{settings.COLLECTION_TARGET_MAX}" step="1"
-             list="collect-count-choices" placeholder="For example {settings.COLLECTION_TARGET_CHOICES[0]}" required{disabled}>
+             list="collect-count-choices" placeholder="Optional - leave blank for all" value="{count_value}"{disabled}>
       <datalist id="collect-count-choices">{"".join(f'<option value="{n}"></option>' for n in settings.COLLECTION_TARGET_CHOICES)}</datalist>
-      <span class="sub">Choose {", ".join(str(n) for n in settings.COLLECTION_TARGET_CHOICES[:-1])} or {settings.COLLECTION_TARGET_CHOICES[-1]}, or type any number up to {settings.COLLECTION_TARGET_MAX}. Duplicates are not counted.</span>
+      <span class="sub" data-count-hint><b>With a number</b> ({", ".join(str(n) for n in settings.COLLECTION_TARGET_CHOICES)} or any number up to {settings.COLLECTION_TARGET_MAX}): collects up to that many eligible, unique vacancies. <b>Blank</b>: collects all eligible, unique vacancies from the period, sources and location chosen here, within the dashboard's search limits. Duplicates are not counted.</span>
       <button class="btn btn-primary" type="submit"{disabled}>{'Collection running...' if running else 'Run job collection'}</button>
+      <button class="btn" type="submit" formaction="/collection/saved"{disabled} title="Instant: lists the vacancies already collected that match these choices. Nothing is searched.">Show saved vacancies</button>
     </form>
     <div class="collect-row">
       <a class="btn" href="{esc(here)}">Refresh dashboard</a>
@@ -272,9 +355,19 @@ def _result_banner(rs: Optional[dict[str, Any]], f: Filters) -> str:
         return ""
     if f.view == "latest":
         n, want = rs.get("shown"), rs.get("target")
-        text = (f"Showing the {n} most recent vacancies from your request" + (f" for {want}" if want else "")
+        text = (f"Your request{f' for {want}' if want else ''}"
                 + (f" ({settings.COLLECTION_WINDOWS[rs['window']][1].lower()})" if rs.get("window") in settings.COLLECTION_WINDOWS else "")
-                + f". {rs['total']} collected jobs are kept in the history.")
+                + f" collected {rs.get('collected', n)} vacancies. ")
+        reasons = []
+        if rs.get("hidden_by_rules"):
+            k = rs["hidden_by_rules"]
+            reasons.append(f"{k} {'is' if k == 1 else 'are'} hidden because {'it does' if k == 1 else 'they do'} not meet the current GCC/BFSI rules")
+        if rs.get("hidden_by_scope"):
+            k = rs["hidden_by_scope"]
+            reasons.append(f"{k} {'is' if k == 1 else 'are'} outside the selected Location scope ({vm.SCOPE_LABELS.get(rs.get('scope'), '')})")
+        shown_n = rs.get("in_scope", n)
+        text += f"Showing {shown_n}" + (": " + "; ".join(reasons) + "." if reasons else ".")
+        text += f" {rs['total']} collected jobs are kept in the history."
         link = f'<a class="btn btn-sm" href="{esc(list_href(f, view="all", page=1))}">Show all collected jobs</a>'
     else:
         text = f"Showing all collected jobs. Your last request for {rs.get('target')} vacancies has {rs.get('available')} of them."
@@ -292,11 +385,11 @@ def render_summary(rows_all: int, page: Page, cards: dict[str, int], f: Filters,
 <p>Use <b>Run job collection</b> above to collect the latest jobs.</p></div></div>"""
     elif page.total == 0:
         table = """<div class="tablewrap"><div class="empty"><h2>No vacancies match these filters</h2>
-<p>Try a wider posted window or clear a filter.</p><p><a class="btn" href="/">Clear all filters</a></p></div></div>"""
+<p>Try a wider posted window or clear a filter.</p><p><a class="btn" href="/" role="button">Reset filters</a></p></div></div>"""
     else:
         body = "\n".join(_row_html(r, f, now, here) for r in page.rows)
         table = f"""<div class="tablewrap"><table class="jobs">
-<thead><tr><th></th><th>{_sort_header(f, "Job title", "title")}</th><th>{_sort_header(f, "Company", "company")}</th>
+<thead><tr><th></th><th>{_sort_header(f, "Job title", "title")}</th><th>{_sort_header(f, "Company", "company")}</th><th>Company Reviews</th>
 <th>Location</th><th>Industry</th><th>Employment type</th><th>{_sort_header(f, "Posted", "recent", "oldest")}</th><th>Source</th><th></th></tr></thead>
 <tbody>
 {body}
@@ -361,11 +454,20 @@ def _posted_html(r: Row, now: datetime) -> str:
     p = r.posted
     if not p.known:
         return na()
-    note = {"exact time": "Exact time from LinkedIn",
-            "estimated time": "Estimated from LinkedIn's relative time (for example, \"5 hours ago\")",
-            "date only": "LinkedIn gave only the date, not a time"}.get(vm.format_precision(p), "")
+    note = {"exact time": "Exact time from the source",
+            "estimated time": "Estimated from the source's relative time (for example, \"5 hours ago\")",
+            "date only": "The source gave only the date, not a time"}.get(vm.format_precision(p), "")
     return (f'{ring_html(p, now)}{esc(vm.format_age(p, now))}<span class="sub">{esc(vm.format_moment(p))}'
             + (f" - {esc(note)}" if note else "") + "</span>")
+
+
+def _also_listed_html(r: Row) -> str:
+    items = []
+    for a in r.also_listed_on:
+        url = vm.safe_http_url(a.get("job_url"))
+        name = esc(a.get("source") or "Another source")
+        items.append(f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">{name}</a>' if url else name)
+    return "<br>".join(items) + '<span class="sub">The same vacancy, counted once</span>'
 
 
 def _with_structured(found: list[str], structured: Optional[str]) -> list[str]:
@@ -373,6 +475,19 @@ def _with_structured(found: list[str], structured: Optional[str]) -> list[str]:
     out = [structured] if structured else []
     out += [x for x in found if x.lower() != (structured or "").lower()]
     return out
+
+
+def _company_link_row(r: Row) -> str:
+    """LinkedIn jobs: the company's LinkedIn page. Other sources (Naukri): the company's website. Blank when not reliably known."""
+    if (r.source or "").lower() == "linkedin":
+        label, url = "Company LinkedIn Page", vm.safe_http_url(r.company_linkedin)
+    else:
+        label, url = "Company Website", vm.safe_http_url(r.company_website)
+    value = ""
+    if url:
+        value = (f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">{esc(url)}</a>'
+                 + (f'<span class="sub">{esc(r.company_link_note)}</span>' if r.company_link_note else ""))
+    return _row(label, value)
 
 
 def _details_table(r: Row, now: datetime) -> str:
@@ -389,36 +504,36 @@ def _details_table(r: Row, now: datetime) -> str:
     summary = f'<p class="description">{esc(sec.summary)}</p>' if sec.summary else na()
     full = (f'<div class="desc-box"><p class="description">{esc(clean_description(r.description))}</p></div>' if r.description
             else na("LinkedIn did not provide a description for this job. Open the original job to read it."))
-    email = (f'<a href="mailto:{esc(r.recruiter_email)}">{esc(r.recruiter_email)}</a>'
-             if r.recruiter_email and _EMAIL.match(r.recruiter_email) else or_na(r.recruiter_email))
-    curl = vm.safe_http_url(r.contact_url)
-    contact_url = (f'<a href="{esc(curl)}" target="_blank" rel="noopener noreferrer">{esc(curl)}</a>' if curl else or_na(r.contact_url))
     rows = "".join([
         _group("Vacancy"),
         _row("Company name", company),
+        _company_link_row(r),
         _row("Job title", esc(r.title) if r.title else na("Untitled vacancy")),
         _row("Designation", designation),
         _row("Industry", _industry_dd(r)),
         _row("Location", or_na(r.location)),
         _row("Work mode", work_mode),
         _group("Posting"),
-        _row("Employment type", or_na(r.employment_type)),
+        _row("Employment type", or_na(r.employment_type) + (f'<span class="sub">Source says: {esc(r.employment_details)}</span>' if r.employment_details else "")),
+        *([_row("Role category", esc(r.role_category) + (f'<span class="sub">Role: {esc(r.job_role)}</span>' if r.job_role else ""))] if r.role_category else []),
+        *([_row("Openings", esc(r.openings))] if r.openings else []),
+        *([_row("Applicants so far", esc(r.applicants))] if r.applicants else []),
+        *([_row("Posted by", esc(r.posted_by))] if r.posted_by else []),
         _row("Posting date", _posted_html(r, now)),
         _row("Source", or_na(r.source) + (f'<span class="sub">Job ID {esc(r.job_id)}</span>' if r.job_id else "")),
         _row("Original job URL", _url_dd(r.job_url)),
-        _row("First found by Orbit", found),
+        *([_row("Also listed on", _also_listed_html(r))] if r.also_listed_on else []),
+        _row("First found by the tool", found),
         _group("Description"),
+        *([_row("Salary", esc(r.salary))] if r.salary else []),
         _row("Job summary", summary),
         _row("Full job description", full),
         _group("Requirements"),
         _row("Key responsibilities", _bullets(list(sec.responsibilities), "Not available")),
-        _row("Required qualifications and skills", _bullets(_with_structured(sec.qualifications, r.education_structured), "Not available")),
-        _row("Experience required", _bullets(_with_structured(sec.experience, r.experience_structured), "Not available")),
-        _group("Recruiter and contact"),
-        _row("Recruiter / contact name", or_na(r.recruiter_name)),
-        _row("Phone number", or_na(r.recruiter_phone)),
-        _row("Email", email),
-        _row("Contact URL", contact_url),
+        _row("Required qualifications and skills", _bullets(_with_structured(sec.qualifications, r.education_structured or r.education), "Not available")),
+        _row("Experience required", _bullets(_with_structured(sec.experience, r.experience_structured or r.experience_text), "Not available")),
+        *([_row("Key skills", esc(", ".join(r.skills)))] if r.skills else []),
+        *_contact_rows(r),
     ])
     return (f'<table class="details" aria-label="Vacancy details"><tbody>{rows}</tbody></table>'
             '<p class="sub mt14">Summary, responsibilities, qualifications and experience are copied word for word from the posted '
@@ -468,8 +583,8 @@ def render_detail(r: Row, back_q: str, now: datetime, run: Optional[dict], banne
     return shell(r.display_title, body, run, now, banner)
 
 
-def render_restarting(now: datetime) -> str:
-    body = ('<div class="msg" data-restart-poll="1"><h1>Restarting Orbit Job Radar</h1>'
+def render_restarting(now: datetime, boot_id: str = "") -> str:
+    body = (f'<div class="msg" data-restart-poll="1" data-boot="{esc(boot_id)}"><h1>Restarting Ace Talent Consulting Job Radar</h1>'
             '<p data-restart-text>The app is restarting. This page reopens the dashboard as soon as it is ready.</p>'
             '<p><a class="btn" href="/">Open the dashboard now</a></p></div>')
     return shell("Restarting", body, None, now)

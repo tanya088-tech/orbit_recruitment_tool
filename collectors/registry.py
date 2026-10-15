@@ -8,6 +8,7 @@ from typing import Type
 
 from collectors.base import JobSource
 from collectors.linkedin.source import LinkedInSource
+from collectors.naukri.source import NaukriSource
 
 _REGISTRY: dict[str, Type[JobSource]] = {}
 
@@ -31,5 +32,4 @@ def available_sources() -> list[str]:
 
 
 register_source(LinkedInSource)
-# register_source(NaukriSource)   # future
-# register_source(IndeedSource)   # future
+register_source(NaukriSource)

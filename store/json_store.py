@@ -19,7 +19,7 @@ from typing import Any, Callable, Optional
 
 from store.base import (DEFAULT_STATUS, MAX_NOTE_LENGTH, STATUSES, IngestResult,
                         JobHistoryStore, RecruiterStateStore, StoreError)
-from store.keys import match_url, job_key
+from store.keys import match_url, job_key, vacancy_fingerprint
 
 _KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
@@ -66,10 +66,23 @@ class _JsonFile:
             self._cache, self._token = data, (st.st_mtime_ns, st.st_size)
 
 
+def _src(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _add_also_listed(target: dict, rec: dict) -> None:
+    """Record that the same vacancy is also listed on another source (primary record stays as first collected)."""
+    alts = target.setdefault("also_listed_on", [])
+    ident = (_src(rec.get("source")), str(rec.get("job_id")))
+    if any((_src(a.get("source")), str(a.get("job_id"))) == ident for a in alts):
+        return
+    alts.append({"source": rec.get("source"), "job_id": rec.get("job_id"), "job_url": rec.get("job_url")})
+
+
 def _fill_missing(target: dict, newer: dict) -> None:
     """Later sightings may only fill gaps; they never overwrite what we first recorded."""
     for k, v in newer.items():
-        if k in ("raw_data", "filter_results"):
+        if k in ("raw_data", "filter_results", "also_listed_on"):
             continue
         empty = target.get(k) in (None, "", [], {}) or (k == "work_mode" and target.get(k) == "Unknown")
         if empty and v not in (None, "", [], {}, "Unknown"):
@@ -101,20 +114,35 @@ class JsonJobHistory(JobHistoryStore):
             # A posting can reappear under another source with the same real URL. Index the stored URLs so
             # such a match is recognised as the SAME vacancy instead of becoming a second row.
             by_url: dict[str, str] = {}
+            by_print: dict[str, list[str]] = {}       # company|title|city -> keys, for the cross-source check
+            by_alt: dict[tuple[str, str], str] = {}   # (source, job_id) already attached as "also listed on" -> key
             for existing_key, stored in data["jobs"].items():
-                u = match_url(stored.get("record") or {})
+                srec = stored.get("record") or {}
+                u = match_url(srec)
                 if u:
                     by_url.setdefault(u, existing_key)
+                fp = vacancy_fingerprint(srec)
+                if fp:
+                    by_print.setdefault(fp, []).append(existing_key)
+                for alt in srec.get("also_listed_on") or []:
+                    by_alt[(_src(alt.get("source")), str(alt.get("job_id")))] = existing_key
             for rec in records:
                 try:
                     key = job_key(rec)
                 except (ValueError, AttributeError):
                     result.unidentifiable += 1
                     continue
+                own_key = key
                 if key not in data["jobs"]:
-                    twin = by_url.get(match_url(rec) or "")
+                    twin = by_url.get(match_url(rec) or "") or by_alt.get((_src(rec.get("source")), str(rec.get("job_id"))))
+                    if not twin:
+                        fp = vacancy_fingerprint(rec)
+                        for cand in by_print.get(fp or "", []):
+                            if _src((data["jobs"][cand].get("record") or {}).get("source")) != _src(rec.get("source")):
+                                twin = cand           # the same opening, listed on a different source
+                                break
                     if twin:
-                        key = twin                      # same URL already stored under another source's key
+                        key = twin                      # same vacancy already stored under another source's key
                 if key in seen_in_file:
                     result.duplicates_in_file += 1
                     continue
@@ -130,12 +158,18 @@ class JsonJobHistory(JobHistoryStore):
                     u = match_url(rec)
                     if u:
                         by_url.setdefault(u, key)
+                    fp = vacancy_fingerprint(rec)
+                    if fp:
+                        by_print.setdefault(fp, []).append(key)
                     result.new += 1
                     result.new_keys.append(key)
                 else:
                     entry["last_seen_run_id"], entry["last_seen_at"] = run_id, _iso(now)
                     entry["times_seen"] = entry.get("times_seen", 1) + 1
                     _fill_missing(entry["record"], rec)
+                    if own_key != key and _src(rec.get("source")) != _src(entry["record"].get("source")):
+                        _add_also_listed(entry["record"], rec)      # keep the other source's link and id
+                        by_alt[(_src(rec.get("source")), str(rec.get("job_id")))] = key
                     result.existing += 1
                     result.existing_keys.append(key)
 

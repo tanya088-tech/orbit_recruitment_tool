@@ -1,7 +1,7 @@
 """The Groxa AI logo for the dashboard header.
 
 The official logo lives on the Groxa AI website. The dashboard downloads it once, on the computer
-running Orbit, and keeps a local copy in dashboard/static/. If the download is not possible
+running the dashboard, and keeps a local copy in dashboard/static/. If the download is not possible
 (no internet, site unreachable, not a PNG) the header shows a text-only "Powered by Groxa AI".
 
 Only the fixed address below is ever requested - never anything typed into the dashboard.
@@ -23,7 +23,7 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 def _download(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "OrbitJobRadar/1.0 (logo fetch)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "AceTalentJobRadar/1.0 (logo fetch)"})
     with urllib.request.urlopen(req, timeout=8) as resp:            # noqa: S310 - fixed https URL
         return resp.read(MAX_BYTES + 1)
 

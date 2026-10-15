@@ -2,3 +2,6 @@ requests>=2.31
 beautifulsoup4>=4.12
 lxml>=4.9
 pytest>=7.4
+# Optional: only needed for the Naukri and Indeed sources (they build their pages with JavaScript).
+# After installing run once:  playwright install chromium
+playwright>=1.40

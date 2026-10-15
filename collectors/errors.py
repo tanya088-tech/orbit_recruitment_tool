@@ -6,6 +6,8 @@ The collector reacts differently to each, which is why they are separate:
   * BlockedError   -> the site is refusing us (rate limit / login wall).
                       We STOP that source. We never try to get around it.
   * ParseError     -> page loaded but did not look like we expected.
+  * SetupError     -> this source cannot run on this computer yet (for example the browser add-on it needs is
+                      not installed). The run for that source stops with a clear instruction.
 """
 
 
@@ -26,4 +28,8 @@ class BlockedError(FetchError):
 
 
 class ParseError(CollectorError):
+    pass
+
+
+class SetupError(CollectorError):
     pass

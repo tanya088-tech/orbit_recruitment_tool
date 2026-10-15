@@ -14,7 +14,7 @@ from processing.work_mode import classify_work_mode
 from store.json_store import JsonJobHistory, JsonRecruiterState
 
 DEMO_BANNER = "Demo data. These vacancies are made up so you can try the dashboard. Nothing here is a real job."
-_TEXT = ("This is a made-up vacancy created to preview the Orbit dashboard.\n\n"
+_TEXT = ("This is a made-up vacancy created to preview the Ace Talent Consulting dashboard.\n\n"
          "It exists only so you can try filters, sorting, saving, statuses and notes.")
 
 
