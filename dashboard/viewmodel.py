@@ -18,9 +18,10 @@ from urllib.parse import urlencode, urlsplit
 from config import settings
 from dashboard.regions import build_region_resolver, indian_state
 from processing.description_sections import extract_designation
-from processing.classifier import classify
+from processing.classifier import classify, headquarters_of
 from processing.contacts import poster_contacts
-from processing.industry import classify_industry
+from processing.hiring_contacts import ContactDirectory, poster_from_record, team_poster_from_entry
+from processing.industry import CLIENT_INDUSTRIES, classify_industry
 from processing.location import check_location
 from processing.normalize import clean_company, clean_location
 from processing.work_mode import FILTER_WORK_MODES, UNKNOWN, work_mode_for   # Phase 2 work-mode rules (reused)
@@ -37,6 +38,8 @@ EMPLOYMENT_OPTIONS = ["all", "Permanent", "Contract"]
 EMPLOYMENT_LABELS = {"all": "All", "Permanent": "Permanent", "Contract": "Contract"}
 WORK_MODE_OPTIONS = ["all"] + FILTER_WORK_MODES           # All, On-site, Hybrid, Remote (Unknown jobs show under All)
 WORK_MODE_LABELS = {"all": "All", **{m: m for m in FILTER_WORK_MODES}}
+HQ_OPTIONS = ["all", "outside", "india"]
+HQ_LABELS = {"all": "All", "outside": "Outside India", "india": "India / Not Outside India"}
 CONTACT_OPTIONS = ["all", "yes", "no"]
 CONTACT_LABELS = {"all": "All", "yes": "Yes", "no": "No"}
 SORT_LABELS = {
@@ -146,6 +149,25 @@ def format_age(p: Posted, now: datetime) -> str:
     return "Not available"
 
 
+def format_iso_day(iso: Optional[str]) -> str:
+    dt = parse_iso_datetime(iso) if iso else None
+    if not dt:
+        return ""
+    t = to_display_tz(dt)
+    return f"{t.day} {t.strftime('%b %Y')}"
+
+
+def format_posted_on(p: Posted) -> str:
+    """The calendar date (and, when the posting gives one, the time) it was posted, in the dashboard's time zone."""
+    off = timedelta(minutes=int(settings.DISPLAY_UTC_OFFSET_MINUTES))
+    if p.moment:
+        t = p.moment.astimezone(UTC) + off
+        return f"{t.day} {t.strftime('%b %Y')}, {t.strftime('%I:%M %p').lstrip('0')} {settings.DISPLAY_TZ_LABEL}"
+    if p.day:
+        return f"{p.day.day} {p.day.strftime('%b %Y')}"
+    return ""
+
+
 def format_precision(p: Posted) -> str:
     if p.moment and p.precision == "exact_timestamp":
         return "exact time"
@@ -235,6 +257,11 @@ class Row:
     potential_gcc: bool = False                # strict GCC evidence (processing/classifier.py)
     potential_bfsi: bool = False               # strict BFSI evidence
     category_reason: str = ""
+    hq_status: str = "unknown"                 # parent company headquarters: outside | india | unknown (evidence only)
+    hq_country: str = ""
+    hq_evidence: str = ""
+    poster: Any = None                         # HiringContact (Job Poster) shown on the original posting, else None
+    suggested_contacts: list = field(default_factory=list)   # HiringContact (Suggested Recruiter) from the contact directory
 
     @property
     def category(self) -> str:
@@ -361,11 +388,12 @@ def _share_company_links(rows: list["Row"]) -> None:
 def assess_record(rec: Mapping[str, Any]):
     """The strict GCC/BFSI verdict for one stored record (same rules as collection)."""
     return classify(rec.get("company"), rec.get("title"), rec.get("description"), rec.get("industries"),
-                    posted_by=rec.get("posted_by"), company_url=rec.get("company_url"))
+                    posted_by=rec.get("posted_by"), company_url=rec.get("company_url"), location=rec.get("location"))
 
 
 def build_rows(jobs: list[dict[str, Any]], states: Mapping[str, Mapping[str, Any]],
-               latest_run_id: Optional[str], only_gcc_bfsi: Optional[bool] = None) -> list[Row]:
+               latest_run_id: Optional[str], only_gcc_bfsi: Optional[bool] = None,
+               team_posters: Optional[Mapping[str, Any]] = None) -> list[Row]:
     """Rows for the dashboard. With only_gcc_bfsi (default: settings.DISPLAY_ONLY_GCC_BFSI) a stored job that
     does not pass the strict rules is left out of the view - it stays in the history file untouched."""
     if only_gcc_bfsi is None:
@@ -374,6 +402,7 @@ def build_rows(jobs: list[dict[str, Any]], states: Mapping[str, Mapping[str, Any
     # Learn state names only from India jobs (a "Hyderabad, Sindh, Pakistan" must not teach Hyderabad -> Sindh).
     resolve_region = build_region_resolver(
         clean_location((e.get("record") or {}).get("location")) for e in jobs if (e.get("record") or {}).get("country") == "India")
+    directory = ContactDirectory.load()
     for entry in jobs:
         rec = entry.get("record") or {}
         verdict = assess_record(rec)
@@ -386,6 +415,7 @@ def build_rows(jobs: list[dict[str, Any]], states: Mapping[str, Mapping[str, Any
         # a missing, unrecognised or two-country location is "unknown" and appears under neither India nor Outside India.
         country = check_location(location).country if location else None
         industry = classify_industry(rec.get("industries"))
+        hq_status, hq_country, hq_evidence = headquarters_of(rec.get("company"), rec.get("description"))
         # Designation: the source's own field, else the "Designation:" / "Role/Job Title:" line of the posting,
         # else LinkedIn's seniority level (its "Not Applicable" filler is not a value).
         d_source, d_desc, d_sen = _clean(rec.get("designation")), extract_designation(rec.get("description")), _seniority(rec.get("seniority_level"))
@@ -397,6 +427,10 @@ def build_rows(jobs: list[dict[str, Any]], states: Mapping[str, Mapping[str, Any
             state=resolve_region.state(location) if country == "India" else "", country=country,
             state_name=indian_state(location, resolve_region.state) if country == "India" else "",
             industry=industry.category, industry_label=industry.label,
+            hq_status=hq_status, hq_country=hq_country, hq_evidence=hq_evidence,
+            poster=(team_poster_from_entry((team_posters or {}).get(entry.get("key")), clean_company(rec.get("company")))
+                    or poster_from_record(rec.get("raw_data"), clean_company(rec.get("company")))),
+            suggested_contacts=directory.suggest(clean_company(rec.get("company")), location, rec.get("title")),
             employment_type=rec.get("employment_type") or None,
             work_mode=work_mode_for(rec),
             posted=parse_posted(rec),
@@ -438,6 +472,8 @@ class Filters:
     posted: str = "all"
     work_mode: str = "all"
     contact: str = "all"          # Contact Details Available: all | yes | no (what the posting itself states)
+    hq: str = "all"               # Parent Company Headquarters: all | outside (verified outside India) | india (India or not verified as outside)
+    industry: str = ""            # Industry Type: "" = All industries; otherwise one category taken from the eligible vacancies
     state: str = ""               # "" = All states; otherwise an official state / UT name taken from the stored vacancies
     sort: str = "recent"
     page: int = 1
@@ -456,8 +492,11 @@ class Filters:
         f.scope = first("scope") if first("scope") in SCOPE_OPTIONS else "india"
         f.scope_explicit = first("scope") in SCOPE_OPTIONS
         f.employment = first("employment") if first("employment") in EMPLOYMENT_OPTIONS else "all"
-        # Source and Job posted are chosen in the collection panel; old links carrying them are ignored (never a hidden filter).
+        # Job posted is chosen in the collection panel; old links carrying it are ignored (never a hidden filter).
+        f.source = first("source")
         f.state = first("state")
+        f.industry = first("industry")
+        f.hq = first("hq") if first("hq") in HQ_OPTIONS else "all"
         f.contact = first("contact") if first("contact") in CONTACT_OPTIONS else "all"
         f.work_mode = first("work_mode") if first("work_mode") in WORK_MODE_OPTIONS else "all"
         f.sort = first("sort") if first("sort") in SORT_LABELS else "recent"
@@ -480,7 +519,7 @@ class Filters:
     @property
     def active_count(self) -> int:
         d = Filters().__dict__
-        return sum(1 for k in ("scope", "employment", "state", "work_mode", "contact") if getattr(self, k) != d[k])
+        return sum(1 for k in ("scope", "employment", "state", "industry", "hq", "work_mode", "contact", "source") if getattr(self, k) != d[k])
 
 
 def apply_filters(rows: list[Row], f: Filters, now: datetime) -> list[Row]:
@@ -499,6 +538,12 @@ def apply_filters(rows: list[Row], f: Filters, now: datetime) -> list[Row]:
         if f.work_mode != "all" and r.work_mode != f.work_mode:
             continue
         if f.state and r.state_name.lower() != f.state.lower():
+            continue
+        if f.industry and r.industry.lower() != f.industry.lower():
+            continue
+        if f.hq == "outside" and r.hq_status != "outside":
+            continue
+        if f.hq == "india" and r.hq_status == "outside":
             continue
         if f.contact == "yes" and not r.contact_direct:
             continue
@@ -546,7 +591,9 @@ def filter_options(rows: list[Row]) -> dict[str, list[str]]:
         for name in r.all_sources:
             seen.setdefault(name.lower(), name)
     states = {r.state_name for r in rows if r.state_name}      # only states that occur in the stored vacancies
-    return {"sources": sorted(seen.values(), key=str.lower), "states": sorted(states, key=str.lower)}
+    # Industry Type: every industry the client works with is always offered (in the client's order); "Other" only when some vacancy has it
+    industries = list(CLIENT_INDUSTRIES) + (["Other"] if any(r.industry == "Other" for r in rows) else [])
+    return {"sources": sorted(seen.values(), key=str.lower), "states": sorted(states, key=str.lower), "industries": industries}
 
 
 @dataclass
@@ -569,6 +616,46 @@ def paginate(rows: list[Row], page: int, size: int = 0) -> Page:
 
 
 # ---------------------------------------------------------------- recruiter / contact details
+_INBOX_WORDS = {"careers", "career", "jobs", "job", "recruiting", "recruitment", "recruiter", "recruiters", "recruit", "talent", "hr",
+                "hiring", "apply", "applications", "application", "people", "resume", "resumes", "cv", "join", "joinus", "staffing",
+                "talentacquisition", "ta", "employment", "vacancies", "openings", "campus", "humanresources", "hrteam", "workwithus"}
+_INBOX_FILLER = {"india", "in", "apac", "global", "emea", "us", "uk", "team", "teams", "acquisition", "office", "desk", "mailbox", "inbox",
+                 "bangalore", "bengaluru", "mumbai", "pune", "chennai", "hyderabad", "delhi", "gurgaon", "gurugram", "noida", "kolkata", "the", "our"}
+
+
+def is_company_inbox(email: str) -> bool:
+    """A shared recruitment / careers mailbox (careers@, recruiting-india@, talent.acquisition@): EVERY word of the part before the @ is a
+    recruitment word or a region/team filler. A person's address (hr.priya@, jobs.rahul@) is not a company inbox."""
+    local = str(email or "").split("@")[0].lower()
+    words = [w for w in re.split(r"[._+\-]+", re.sub(r"\d+", "", local)) if w]
+    return bool(words) and all(w in _INBOX_WORDS or w in _INBOX_FILLER for w in words) and any(w in _INBOX_WORDS for w in words)
+
+
+@dataclass
+class ContactGroups:
+    """What the posting itself states, split by kind so a company mailbox is never presented as a named recruiter's address."""
+    names: list = field(default_factory=list)
+    emails: list = field(default_factory=list)       # personal-looking addresses stated in the posting
+    inboxes: list = field(default_factory=list)      # shared company recruitment / careers mailboxes
+    phones: list = field(default_factory=list)
+    linkedin: Optional[str] = None
+    links: list = field(default_factory=list)        # apply / contact links (not contact details)
+
+    @property
+    def any(self) -> bool:
+        return bool(self.names or self.emails or self.inboxes or self.phones or self.linkedin)
+
+
+def contact_groups(r: "Row") -> ContactGroups:
+    g = ContactGroups(linkedin=r.contact_linkedin, links=list(r.contact_urls))
+    if r.recruiter_name:
+        g.names.append(r.recruiter_name)
+    for e in r.contact_emails:
+        (g.inboxes if is_company_inbox(e) else g.emails).append(e)
+    g.phones = list(r.contact_phones)
+    return g
+
+
 # ---------------------------------------------------------------- fetch-time filters
 FETCH_FILTER_KEYS = ("employment", "work_mode", "state", "contact")
 
@@ -650,3 +737,7 @@ def _fill_contacts(r: Row) -> None:
     if not r.recruiter_name and c.name:
         r.recruiter_name = c.name
     r.contact_direct = c.direct
+    if r.poster is not None and r.poster.linkedin_url:         # the posting itself names the poster with a profile link
+        r.contact_direct = True
+        r.contact_linkedin = r.contact_linkedin or safe_http_url(r.poster.linkedin_url)
+        r.recruiter_name = r.recruiter_name or r.poster.name

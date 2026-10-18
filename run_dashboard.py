@@ -23,7 +23,7 @@ from dashboard.collection import CollectionManager
 from dashboard.demo import DEMO_BANNER, build_demo
 from dashboard.server import STATIC_DIR, DashboardApp, make_handler
 from store.ingest import ingest_filtered_file, newest_normalized_file
-from store.json_store import JsonJobHistory, JsonRecruiterState
+from store.json_store import JsonJobHistory, JsonPosterEntries, JsonRecruiterState
 
 
 def _already_running(host: str, port: int) -> bool:
@@ -103,7 +103,7 @@ def main() -> int:
         if holder.get("server") is not None:
             holder["server"].shutdown()
 
-    app = DashboardApp(history, state, banner=banner, collection=collection, restart_fn=request_restart)
+    app = DashboardApp(history, state, posters=JsonPosterEntries(Path(data_dir) / "poster_entries.json"), banner=banner, collection=collection, restart_fn=request_restart)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     server.daemon_threads = True              # an open connection must never keep the old process alive during a restart
     holder["server"] = server

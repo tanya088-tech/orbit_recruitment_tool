@@ -76,7 +76,7 @@ def test_naukri_urls():
     assert [age_filter(d) for d in (1, 2, 5, 8, 20, 90)] == [1, 3, 7, 15, 30, 30]
 
 
-def test_registry_has_all_three_sources():
+def test_registry_has_both_sources():
     assert available_sources() == ["linkedin", "naukri"]
     assert get_source("Naukri", client=object()).name == "naukri"
 
@@ -412,3 +412,139 @@ def test_details_page_labels_the_field_by_source_and_leaves_it_blank_when_unknow
     assert '<th scope="row">Company LinkedIn Page</th><td></td>' in h["linkedin-5"]
     js = {"key": "naukri-6", "record": make_record(6, company="Evil", source="Naukri", company_website="javascript:alert(1)")}
     assert "javascript:" not in views._details_table(vm.build_rows([js], {}, None)[0], NOW)
+
+
+def test_a_blocked_source_is_rested_so_retrying_does_not_extend_the_block(tmp_path):
+    from datetime import timedelta
+    from tests.test_cross_source import fake_runner_factory
+    from tests.factories import NOW
+    from dashboard.collection import CollectionManager
+    from config import settings
+    from store.json_store import JsonJobHistory
+    calls, clock = [], {"now": NOW}
+
+    def runner(cmd, on_line, cwd, timeout):
+        src = cmd[cmd.index("--source") + 1] if "--source" in cmd else "linkedin"
+        if src == "linkedin":
+            on_line("00:23:24 | ERROR   | collectors.collector | SOURCE BLOCKED US - stopping run. Reason: HTTP 429 (rate limited / blocked)")
+            calls.append("linkedin")
+            return 2
+        return fake_runner_factory({"naukri": [("9", "Credit Risk Analyst", "Acme Bank", "2026-10-12")]}, calls)(cmd, on_line, cwd, timeout)
+
+    m = CollectionManager(JsonJobHistory(tmp_path / "h.json"), tmp_path, tmp_path / "out", runner=runner, now_fn=lambda: clock["now"], background=False)
+    m.start("india", target=5, sources=["LinkedIn"])
+    assert calls.count("linkedin") == 1 and m.cooling_until("linkedin")
+    assert "rest" in m.status()["last_error"].lower() or "later" in m.status()["last_error"].lower()
+    ok, msg = m.start("india", target=5, sources=["LinkedIn"])                     # straight away: refused, not sent to LinkedIn
+    assert not ok and "resting" in msg.lower() or "rested" in msg
+    assert calls.count("linkedin") == 1
+    ok, _ = m.start("india", target=5, sources=["LinkedIn", "Naukri"])             # another source still runs
+    assert ok and calls.count("linkedin") == 1 and any(c != "linkedin" for c in calls)
+    clock["now"] = NOW + timedelta(minutes=settings.SOURCE_COOLDOWN_MINUTES + 1)   # after the rest it is tried again
+    assert m.cooling_until("linkedin") is None and m.start("india", target=5, sources=["LinkedIn"])[0]
+    assert calls.count("linkedin") == 2
+
+
+# -- our own browser failing is not "the site blocked us" ------------------------------------------
+from collectors.errors import FetchError, LocalBrowserError
+from collectors.browser_client import local_failure_kind
+
+
+class FlakyPage(FakePage):
+    """goto raises the given errors one after another (None = succeed)."""
+    def __init__(self, errors):
+        super().__init__()
+        self.errors = list(errors)
+
+    def goto(self, url, **kw):
+        self.visited.append(url)
+        err = self.errors.pop(0) if self.errors else None
+        if err is not None:
+            raise err
+        return type("R", (), {"status": 200})()
+
+
+def test_local_failure_kinds_are_recognised_and_site_errors_are_not():
+    assert local_failure_kind(RuntimeError("Page.goto: net::ERR_NETWORK_CHANGED at https://x")) == "network"
+    assert local_failure_kind(RuntimeError("TargetClosedError: Page.goto: Page crashed")) == "crash"
+    assert local_failure_kind(RuntimeError("Page.goto: net::ERR_ABORTED; maybe frame was detached?")) == "crash"
+    for site_side in ("Page.goto: Timeout 30000ms exceeded", "net::ERR_CONNECTION_RESET", "HTTP 503", "net::ERR_HTTP2_PROTOCOL_ERROR"):
+        assert local_failure_kind(RuntimeError(site_side)) is None
+
+
+def test_a_crashed_page_is_reopened_and_the_same_url_is_loaded_again():
+    made = []
+    pages = [FlakyPage([RuntimeError("TargetClosedError: Page.goto: Page crashed")]), FakePage()]
+    def factory():
+        made.append(1)
+        return pages[len(made) - 1]
+    c = BrowserClient(delay_min=0, delay_max=0, page_factory=factory, sleep=lambda s: None)
+    assert "ok" in c.get("https://x.test/job")
+    assert len(made) == 2 and pages[0].visited == ["https://x.test/job"] and pages[1].visited == ["https://x.test/job"]
+
+
+def test_a_network_change_waits_and_retries_without_reopening_the_page():
+    waits, made = [], []
+    page = FlakyPage([RuntimeError("Page.goto: net::ERR_NETWORK_CHANGED at https://x.test/job")] * 2)
+    c = BrowserClient(delay_min=0, delay_max=0, page_factory=lambda: (made.append(1), page)[1], sleep=waits.append)
+    assert "ok" in c.get("https://x.test/job")
+    assert len(made) == 1 and len(page.visited) == 3
+    assert [w for w in waits if w] == [settings.BROWSER_RECOVERY_WAIT * 3, settings.BROWSER_RECOVERY_WAIT * 6]
+
+
+def test_a_browser_that_keeps_crashing_is_a_local_error_never_a_block():
+    crash = RuntimeError("TargetClosedError: Page.goto: Page crashed")
+    page = FlakyPage([crash] * 10)
+    try:
+        BrowserClient(delay_min=0, delay_max=0, page_factory=lambda: page, sleep=lambda s: None).get("https://x.test/job")
+        raised = None
+    except Exception as exc:
+        raised = exc
+    assert isinstance(raised, LocalBrowserError) and isinstance(raised, FetchError) and not isinstance(raised, BlockedError)
+    assert "did not refuse anything" in str(raised)
+    assert len(page.visited) == settings.BROWSER_RECOVERY_RETRIES + 1
+
+
+def test_an_ordinary_load_error_is_still_a_plain_fetch_error_and_a_403_is_still_a_block():
+    page = FlakyPage([RuntimeError("Page.goto: Timeout 30000ms exceeded")])
+    try:
+        client(page).get("https://x.test/job")
+        raised = None
+    except Exception as exc:
+        raised = exc
+    assert isinstance(raised, FetchError) and not isinstance(raised, (LocalBrowserError, BlockedError)) and len(page.visited) == 1
+    with pytest.raises(BlockedError):
+        client(FakePage(status=403)).get("https://x.test/job")
+
+
+class _DetailCrashPage(ScriptedPage):
+    def __init__(self, routes, error):
+        super().__init__(routes)
+        self.error = error
+
+    def goto(self, url, **kw):
+        if "job-listings" in url:
+            self.visited.append(url)
+            raise self.error
+        return super().goto(url, **kw)
+
+
+def _naukri_run(error, monkeypatch):
+    page = _DetailCrashPage({"naukri.com/bank-jobs": read("naukri_search.html")}, error)
+    res = Collector(NaukriSource(client=client(page))).run([SearchParams("bank", "India", days=365, max_pages=1)])
+    return res, page
+
+
+def test_repeated_browser_crashes_stop_the_place_without_reporting_a_block(monkeypatch=None):
+    monkeypatch.setattr(settings, "MAX_CONSECUTIVE_FAILURES", 1)             # even the strictest "blocked" breaker must not fire
+    monkeypatch.setattr(settings, "MAX_CONSECUTIVE_BROWSER_FAILURES", 2)
+    res, page = _naukri_run(RuntimeError("TargetClosedError: Page.goto: Page crashed"), monkeypatch)
+    assert not res.stats.blocked and res.jobs == [] and res.stats.setup_error is None
+    detail_visits = [u for u in page.visited if "job-listings" in u]
+    assert len(detail_visits) == 2 * (settings.BROWSER_RECOVERY_RETRIES + 1)
+
+
+def test_repeated_ordinary_failures_still_trip_the_blocked_breaker(monkeypatch=None):
+    monkeypatch.setattr(settings, "MAX_CONSECUTIVE_FAILURES", 2)
+    res, _ = _naukri_run(RuntimeError("Page.goto: Timeout 30000ms exceeded"), monkeypatch)
+    assert res.stats.blocked

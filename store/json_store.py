@@ -19,7 +19,7 @@ from typing import Any, Callable, Optional
 
 from store.base import (DEFAULT_STATUS, MAX_NOTE_LENGTH, STATUSES, IngestResult,
                         JobHistoryStore, RecruiterStateStore, StoreError)
-from store.keys import match_url, job_key, vacancy_fingerprint
+from store.keys import job_key, lane, match_url, vacancy_fingerprint
 
 _KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
@@ -113,19 +113,23 @@ class JsonJobHistory(JobHistoryStore):
             seen_in_file: set[str] = set()
             # A posting can reappear under another source with the same real URL. Index the stored URLs so
             # such a match is recognised as the SAME vacancy instead of becoming a second row.
-            by_url: dict[str, str] = {}
-            by_print: dict[str, list[str]] = {}       # company|title|city -> keys, for the cross-source check
+            # Matching is done inside a lane: Company Careers records are matched only with each other, and never with (or into)
+            # LinkedIn / Naukri records, so a careers vacancy cannot change a main-list record and a main-list job cannot vanish into one.
+            by_url: dict[tuple[str, str], str] = {}
+            by_print: dict[tuple[str, str], list[str]] = {}       # (lane, company|title|city) -> keys, for the cross-source check
             by_alt: dict[tuple[str, str], str] = {}   # (source, job_id) already attached as "also listed on" -> key
             for existing_key, stored in data["jobs"].items():
                 srec = stored.get("record") or {}
+                ln = lane(srec.get("source"))
                 u = match_url(srec)
                 if u:
-                    by_url.setdefault(u, existing_key)
+                    by_url.setdefault((ln, u), existing_key)
                 fp = vacancy_fingerprint(srec)
                 if fp:
-                    by_print.setdefault(fp, []).append(existing_key)
+                    by_print.setdefault((ln, fp), []).append(existing_key)
                 for alt in srec.get("also_listed_on") or []:
-                    by_alt[(_src(alt.get("source")), str(alt.get("job_id")))] = existing_key
+                    if lane(alt.get("source")) == ln:
+                        by_alt[(_src(alt.get("source")), str(alt.get("job_id")))] = existing_key
             for rec in records:
                 try:
                     key = job_key(rec)
@@ -133,11 +137,12 @@ class JsonJobHistory(JobHistoryStore):
                     result.unidentifiable += 1
                     continue
                 own_key = key
+                rec_lane = lane(rec.get("source"))
                 if key not in data["jobs"]:
-                    twin = by_url.get(match_url(rec) or "") or by_alt.get((_src(rec.get("source")), str(rec.get("job_id"))))
+                    twin = by_url.get((rec_lane, match_url(rec) or "")) or by_alt.get((_src(rec.get("source")), str(rec.get("job_id"))))
                     if not twin:
                         fp = vacancy_fingerprint(rec)
-                        for cand in by_print.get(fp or "", []):
+                        for cand in by_print.get((rec_lane, fp or ""), []):
                             if _src((data["jobs"][cand].get("record") or {}).get("source")) != _src(rec.get("source")):
                                 twin = cand           # the same opening, listed on a different source
                                 break
@@ -157,10 +162,10 @@ class JsonJobHistory(JobHistoryStore):
                     }
                     u = match_url(rec)
                     if u:
-                        by_url.setdefault(u, key)
+                        by_url.setdefault((rec_lane, u), key)
                     fp = vacancy_fingerprint(rec)
                     if fp:
-                        by_print.setdefault(fp, []).append(key)
+                        by_print.setdefault((rec_lane, fp), []).append(key)
                     result.new += 1
                     result.new_keys.append(key)
                 else:
@@ -252,3 +257,52 @@ class JsonRecruiterState(RecruiterStateStore):
         def fn(e):
             e["notes"] = [n for n in e["notes"] if n.get("id") != note_id]
         return self._mutate(key, fn)
+
+
+class JsonPosterEntries:
+    """Job posters your team confirmed on LinkedIn (the 'Meet the hiring team' block, visible to a signed-in person).
+    Kept in its own file, apart from the vacancy history and the recruiter state. Nothing here is fetched automatically."""
+    def __init__(self, path: Any, now_fn: Callable[[], datetime] = _utcnow) -> None:
+        self._f = _JsonFile(path, lambda: {"version": 1, "posters": {}})
+        self._now = now_fn
+
+    def get_all(self) -> dict[str, Any]:
+        return copy.deepcopy(self._f.load().get("posters", {}))
+
+    def set(self, key: str, name: str, designation: str, profile_url: str, entered_by: str, confirmed: bool) -> None:
+        from processing.hiring_contacts import clean_profile_url
+        if not _KEY_RE.match(str(key or "")):
+            raise StoreError("invalid job key")
+        name, designation, entered_by = " ".join(str(name or "").split()), " ".join(str(designation or "").split()), " ".join(str(entered_by or "").split())
+        url = clean_profile_url(profile_url)
+        if not 2 <= len(name) <= 100:
+            raise StoreError("Enter the poster's name exactly as shown on the posting.")
+        if not url:
+            raise StoreError("Enter the poster's LinkedIn profile link (it must look like linkedin.com/in/their-name).")
+        if not 2 <= len(entered_by) <= 80:
+            raise StoreError("Enter your own name so the entry can be traced.")
+        if not confirmed:
+            raise StoreError("Tick the box to confirm you saw this person under 'Meet the hiring team' on the LinkedIn posting.")
+        with self._f.lock:
+            data = copy.deepcopy(self._f.load())
+            data.setdefault("posters", {})[key] = {"name": name, "designation": designation[:120] or None, "profile_url": url, "entered_by": entered_by,
+                                                   "confirmed": True, "entered_at": _iso(self._now())}
+            self._f.save(data)
+
+    def remove(self, key: str) -> None:
+        with self._f.lock:
+            data = copy.deepcopy(self._f.load())
+            if data.get("posters", {}).pop(key, None) is not None:
+                self._f.save(data)
+
+
+class MemoryPosterEntries(JsonPosterEntries):
+    """Same behaviour, kept in memory only (used when no file is given, e.g. in tests, so nothing is written to disk)."""
+    def __init__(self, now_fn: Callable[[], datetime] = _utcnow) -> None:
+        class _Mem:
+            lock = threading.RLock()
+            data: dict = {"version": 1, "posters": {}}
+            def load(self): return self.data
+            def save(self, d): self.data = d
+        self._f, self._now = _Mem(), now_fn
+

@@ -50,7 +50,7 @@ class FilterRun:
 
 def evaluate_job(job: dict[str, Any], as_of: datetime, include_ambiguous_date: bool = False) -> EvaluatedJob:
     cls = classify(job.get("company"), job.get("title"), job.get("description"), job.get("industries"),
-                   posted_by=job.get("posted_by"), company_url=job.get("company_url"))
+                   posted_by=job.get("posted_by"), company_url=job.get("company_url"), location=job.get("location"))
     emp = map_employment_type(job.get("employment_type"))
     loc = check_location(job.get("location"))
     posted = evaluate_posting(job, as_of=as_of, include_ambiguous_date=include_ambiguous_date)

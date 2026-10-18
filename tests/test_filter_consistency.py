@@ -153,31 +153,40 @@ def test_unusual_values_are_shown_honestly_not_replaced_by_the_first_option(tmp_
         assert "<script>alert" not in h
 
 
-def test_source_and_posted_dropdowns_are_gone_from_the_dashboard_filters(tmp_path):
+def test_the_source_dropdown_is_on_the_dashboard_filters_and_posted_is_not(tmp_path):
     with running(tmp_path, records=[make_record(1)], second_run=[]) as (port, app):
         h = get(port, "/")[2]
-        assert 'id="f-source"' not in h and 'id="f-posted"' not in h
+        assert 'id="f-source"' in h and 'id="f-posted"' not in h
         assert 'id="collect-window"' in h and 'name="source"' in h          # the collection panel keeps both choices
 
 
 # ---- the collection form (the "International shows India" case) ----------------------------------------------
-def test_collection_form_shows_the_options_of_the_last_run(tmp_path):
+def test_collection_form_always_opens_with_the_defaults(tmp_path):
+    """LinkedIn + Naukri ticked, India, last 24 hours - on first open and again after any earlier run."""
     app, mgr = make_app(tmp_path)
     srv = serve(app); port = srv.server_address[1]
+
+    def check(h):
+        assert '<option value="india" selected>' in h and '<option value="24h" selected>' in h
+        assert re.search(r'name="source" value="LinkedIn" checked', h) and re.search(r'name="source" value="Naukri" checked', h)
     try:
-        h = get(port, "/")[2]
-        assert re.search(r'<option value="india" selected>', h)                                 # nothing run yet: the default
-        call(port, "POST", "/collection/run", {"scope": "international", "count": "75", "window": "7d"})
-        for _ in range(2):                                                                     # also after a refresh
-            h = get(port, "/")[2]
-            assert '<option value="international" selected>International only</option>' in h
-            assert '<option value="7d" selected>Last 7 days</option>' in h
-            panel = h[h.index('id="collect-scope"'):h.index('id="collect-window"')]
-            assert 'value="75"' in h and 'value="india" selected' not in panel
-        call(port, "POST", "/collection/run", {"scope": "both", "count": "50"})
-        assert '<option value="both" selected>' in get(port, "/")[2] and '<option value="24h" selected>' in get(port, "/")[2]
+        check(get(port, "/")[2])
+        call(port, "POST", "/collection/run", {"scope": "international", "count": "75", "window": "7d", "sources_sent": "1", "source": "LinkedIn"})
+        for _ in range(2):
+            check(get(port, "/")[2])
     finally:
         srv.shutdown(); srv.server_close()
+
+
+def test_a_run_that_reaches_its_target_shows_a_green_success_message():
+    base = {"state": "succeeded", "scope": "india", "window": "24h", "target": 50, "collected_unique": 50, "stop_reason": "target_reached",
+            "search_done": 1, "search_total": 1, "warnings": [], "log_tail": [], "last_success_at": None, "last_summary": None}
+    cv = lambda **kw: {"status": {**base, **kw}, "enabled": True, "default_scope": "india"}
+    html = views._collection_panel(cv(), "/", NOW)
+    assert "data-collect-success" in html and "Successfully run: target reached" in html and "50 of 50" in html
+    assert 'state-succeeded" data-collect-state>Target reached' in html
+    for kw in ({"stop_reason": "exhausted", "collected_unique": 30}, {"stop_reason": "blocked", "state": "partial"}, {"target": None}):
+        assert "data-collect-success" not in views._collection_panel(cv(**kw), "/", NOW)
 
 
 def test_after_a_vacancy_request_the_location_filter_shows_what_is_displayed(tmp_path):

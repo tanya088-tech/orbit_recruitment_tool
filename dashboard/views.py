@@ -15,6 +15,7 @@ from config import locations as loc_config
 from config import settings
 from dashboard import branding
 from dashboard import viewmodel as vm
+from processing import hiring_contacts as hc
 from processing.description_sections import clean_description, extract_sections
 from dashboard.viewmodel import Filters, Page, Posted, Row
 from store.base import STATUSES
@@ -118,6 +119,9 @@ def _filters_form(f: Filters, options: dict[str, list[str]]) -> str:
     scope = _select("scope", "Location scope", [(k, vm.SCOPE_LABELS[k]) for k in vm.SCOPE_OPTIONS], f.scope)
     emp = _select("employment", "Employment type", [(k, vm.EMPLOYMENT_LABELS[k]) for k in vm.EMPLOYMENT_OPTIONS], f.employment)
     state = _select("state", "State", [("", "All states")] + [(x, x) for x in options.get("states", [])], f.state)
+    industry = _select("industry", "Industry Type", [("", "All industries")] + [(x, x) for x in options.get("industries", [])], f.industry)
+    hq = _select("hq", "Parent Company Headquarters", [(k, vm.HQ_LABELS[k]) for k in vm.HQ_OPTIONS], f.hq)
+    source = _select("source", "Source", [("", "All sources")] + [(x, x) for x in options.get("sources", [])], f.source)
     contact = _select("contact", "Contact Details Available", [(k, vm.CONTACT_LABELS[k]) for k in vm.CONTACT_OPTIONS], f.contact)
     mode = _select("work_mode", "Work mode", [(k, vm.WORK_MODE_LABELS[k]) for k in vm.WORK_MODE_OPTIONS], f.work_mode)
     sort = _select("sort", "Sort by", list(vm.SORT_LABELS.items()), f.sort)
@@ -126,7 +130,7 @@ def _filters_form(f: Filters, options: dict[str, list[str]]) -> str:
   {'<input type="hidden" name="view" value="all">' if f.view == "all" else ""}
   <div class="filter-grid">
     {scope}{state}{emp}
-    {mode}{contact}{sort}
+    {mode}{industry}{hq}{source}{contact}{sort}
     <div class="filter-actions"><button class="btn btn-primary" type="submit">Apply filters</button>
       <a class="btn btn-reset" href="/" role="button" data-reset-filters title="Back to the default view: Within India, all states, no sorting or page">Reset filters</a></div>
   </div>
@@ -143,6 +147,31 @@ def _status_chip(status: str) -> str:
     return f'<span class="status status-{esc(status.replace(" ", "-"))}">{esc(status)}</span>'
 
 
+def _contact_cell(r: Row) -> str:
+    """Recruiter contact shown straight in the list: only what the posting itself states (never looked up or guessed)."""
+    parts = []
+    if r.recruiter_name:
+        parts.append(f'<div class="ct-name">{esc(r.recruiter_name)}</div>')
+    for e in r.contact_emails:
+        parts.append(f'<div><a href="mailto:{esc(e)}">{esc(e)}</a></div>' if _EMAIL.match(e) else f"<div>{esc(e)}</div>")
+    for ph in r.contact_phones:
+        parts.append(f'<div><a href="tel:{esc(re.sub(r"[^0-9+]", "", ph))}">{esc(ph)}</a></div>')
+    li = vm.safe_http_url(r.contact_linkedin)
+    if li:
+        parts.append(f'<div><a href="{esc(li)}" target="_blank" rel="noopener noreferrer">LinkedIn profile</a></div>')
+    if not parts or not r.contact_direct:
+        return '<span class="ct-none">Not stated in the posting</span>'
+    return "".join(parts)
+
+
+NOT_STATED = "Not stated in posting"
+
+
+def _original_link(r: Row) -> str:
+    url = vm.safe_http_url(r.job_url)
+    return (f'<div><a class="sub" href="{esc(url)}" target="_blank" rel="noopener noreferrer">View original</a></div>' if url else "")
+
+
 def _row_html(r: Row, f: Filters, now: datetime, here: str) -> str:
     fresh = vm.freshness(r.posted, now)
     h = vm.age_hours(r.posted, now)
@@ -154,18 +183,57 @@ def _row_html(r: Row, f: Filters, now: datetime, here: str) -> str:
 <td class="c-flag">{'<span class="badge-new">New</span>' if r.is_new else ''}</td>
 <td class="c-title"><a class="job-link" href="{esc(detail_href(r.key, f))}">{esc(r.display_title) if r.title else na("Untitled vacancy")}</a>{('<div>' + chip + '</div>') if chip else ''}</td>
 <td>{or_na(r.company)}</td>
+<td class="c-contact">{_contact_cell(r)}</td>
 <td class="c-reviews">{esc(vm.format_company_reviews(r.company_rating, r.company_reviews))}</td>
 <td>{or_na(r.location)}</td>
 <td>{_industry_cell(r)}</td>
 <td>{or_na(r.employment_type)}</td>
-<td class="c-posted">{ring_html(r.posted, now)}<span class="{hot.strip()}">{esc(vm.format_age(r.posted, now))}</span>{f'<div class="sub">{esc(precision)}</div>' if precision else ''}</td>
-<td>{or_na(", ".join(r.all_sources))}</td>
+<td class="c-posted">{ring_html(r.posted, now)}<span class="{hot.strip()}">{esc(vm.format_age(r.posted, now))}</span>{f'<div class="sub">{esc(vm.format_posted_on(r.posted))}</div>' if vm.format_posted_on(r.posted) else ''}{f'<div class="sub">{esc(precision)}</div>' if precision else ''}</td>
+<td>{or_na(", ".join(r.all_sources))}{_original_link(r)}</td>
 <td class="c-act">
   <form class="inline" method="post" action="/job/{esc(quote(r.key))}/save">
     <input type="hidden" name="saved" value="{0 if r.saved else 1}"><input type="hidden" name="next" value="{esc(here)}">
     <button class="star{star_on}" type="submit" aria-label="{'Remove from saved jobs' if r.saved else 'Save job'}" title="{'Saved. Click to remove' if r.saved else 'Save job'}">{'&#9733;' if r.saved else '&#9734;'}</button></form>
   <a class="btn btn-sm" href="{esc(detail_href(r.key, f))}">View details</a></td>
 </tr>"""
+
+
+def _hiring_contact_rows(r: Row) -> list[str]:
+    """Job Poster (confirmed: shown on the posting) and Suggested Recruiters (from the team's contact directory, never claimed to be the poster)."""
+    def person(c) -> str:
+        kind = ('<span class="tag tag-contact">Job Poster</span><span class="sub">Added by your team: ' + esc(c.entered_by or "") + ", " + esc(vm.format_iso_day(c.entered_at))
+                + '. Seen on the LinkedIn posting under Meet the hiring team.</span>' if c.kind == hc.TEAM_POSTER else
+                '<span class="tag tag-contact">Job Poster</span><span class="sub">Shown on the original job posting</span>' if c.kind == hc.JOB_POSTER
+                else '<span class="tag tag-suggested">Suggested Recruiter</span><span class="sub">Not confirmed as the person who posted this job</span>')
+        bits = [f"<strong>{esc(c.name)}</strong>" if c.name else ""]
+        if c.designation:
+            bits.append(esc(c.designation))
+        if c.company:
+            bits.append(esc(c.company))
+        li = vm.safe_http_url(c.linkedin_url)
+        if li:
+            bits.append(f'<a href="{esc(li)}" target="_blank" rel="noopener noreferrer">LinkedIn profile</a>')
+        if c.email and _EMAIL.match(c.email):
+            bits.append(f'<a href="mailto:{esc(c.email)}">{esc(c.email)}</a>')
+        if c.phone:
+            bits.append(esc(c.phone))
+        src = f'<span class="sub">Source: {esc(c.source)}</span>' if c.kind == hc.SUGGESTED and c.source else ""
+        return kind + "<div>" + " &middot; ".join(b for b in bits if b) + "</div>" + src
+    rows = [_group("Hiring contacts")]
+    if r.poster is not None:
+        rows.append(_row("Job poster", person(r.poster)))
+    else:
+        rows.append(_row("Job poster", '<span class="na">Not shown on the posting</span><span class="sub">The public page did not name who posted it</span>'))
+    for i, c in enumerate(r.suggested_contacts, 1):
+        rows.append(_row(f"Suggested recruiter {i}", person(c)))
+    if not r.suggested_contacts:
+        rows.append(_row("Suggested recruiters", '<span class="na">None on file for this company</span>'
+                         '<span class="sub">Add recruiters from an authorised source with import_hiring_contacts.py</span>'))
+    search = hc.linkedin_people_search_url(r.company)
+    if search:
+        rows.append(_row("Find on LinkedIn", f'<a href="{esc(search)}" target="_blank" rel="noopener noreferrer">Search recruiters at this company</a>'
+                         '<span class="sub">Opens LinkedIn in your own session. This is a search shortcut, not a contact.</span>'))
+    return rows
 
 
 def _contact_rows(r: Row) -> list[str]:
@@ -205,7 +273,7 @@ def _fmt_time(iso: Optional[str], now: datetime) -> str:
 
 
 _STOP_LABELS = {"target_reached": "Target reached", "exhausted": "Results exhausted", "incomplete": "Some places could not be searched",
-                "blocked": "Could not continue (source refused requests)", "interrupted": "Could not continue (interrupted)",
+                "blocked": "Finished (a source stopped early)", "interrupted": "Could not continue (interrupted)",
                 "time_limit": "Could not continue (time limit)", "error": "Failed"}
 
 
@@ -258,6 +326,11 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
     done, total = int(st.get("search_done") or 0), int(st.get("search_total") or 0)
     labels = {"idle": "Not run yet", "running": "Running", "succeeded": "Last run finished", "partial": "Stopped early",
               "failed": "Last run failed"}
+    reached = st["state"] == "succeeded" and st.get("stop_reason") == "target_reached" and bool(st.get("target"))
+    if reached:
+        labels["succeeded"] = "Target reached"
+    success = (f'<p class="success" role="status" data-collect-success>Successfully run: target reached. '
+               f'{int(st.get("collected_unique") or 0)} of {int(st["target"])} requested vacancies collected.</p>') if reached else ""
     last = (f'Last successful run: {esc(_fmt_time(st.get("last_success_at"), now))}'
             + (f' - {int(st["last_summary"].get("new", 0))} new, {int(st["last_summary"].get("existing", 0))} already in the history'
                if st.get("last_summary") and st.get("last_success_at") else "")
@@ -268,7 +341,10 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
         progress = (f'<progress class="collect-bar" data-collect-bar max="{max(total, 1)}" value="{min(done, max(total, 1))}"></progress>'
                     f'<p class="sub" data-collect-detail>{esc("Place " + str(done + 1 if done < total else total) + " of " + str(total)) if total else ""}'
                     f'{" - " + esc(st["current_search"]) if st.get("current_search") else ""}{", page " + esc(st["current_page"]) if st.get("current_page") else ""}</p>')
-    error = (f'<p class="error" role="alert" data-collect-error>{esc(st["last_error"])}</p>' if st.get("last_error") else "")
+    # A source that stopped early (e.g. LinkedIn HTTP 429) is not shown as a red banner; the vacancies collected are shown as usual
+    # and the technical reason stays under Details and in the log.
+    error = (f'<p class="error" role="alert" data-collect-error>{esc(st["last_error"])}</p>'
+             if st.get("last_error") and st.get("stop_reason") != "blocked" else "")
     warnings = ""
     if st.get("warnings") or st.get("log_tail"):
         items = "".join(f"<li>{esc(w)}</li>" for w in st.get("warnings", [])[:8])
@@ -277,9 +353,10 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
                     + (f"<p class=\"sub\">Problems reported by the collector:</p><ul>{items}</ul>" if items else "")
                     + (f"<pre>{esc(tail)}</pre>" if tail else "") + "</details>")
     # the form shows what the last run used (scope, window, number), so it never disagrees with the status above it
-    chosen_scope = st.get("scope") if st.get("scope") in loc_config.SCOPES else cv["default_scope"]
-    chosen_window = st.get("window") if st.get("window") in settings.COLLECTION_WINDOWS else settings.COLLECTION_DEFAULT_WINDOW
-    chosen_sources = [s for s in (st.get("sources") or settings.COLLECTION_DEFAULT_SOURCES) if s in settings.SUPPORTED_SOURCES]
+    # the form always opens with the defaults (LinkedIn + Naukri, India, last 24 hours); what the last run used is shown in its status above
+    chosen_scope = cv["default_scope"] if cv["default_scope"] in loc_config.SCOPES else "india"
+    chosen_window = settings.COLLECTION_DEFAULT_WINDOW
+    chosen_sources = [s for s in settings.COLLECTION_DEFAULT_SOURCES if s in settings.SUPPORTED_SOURCES]
     count_value = int(st["target"]) if st.get("target") else ""
     scope_opts = "".join(
         f'<option value="{esc(k)}"{" selected" if k == chosen_scope else ""}>{esc(v)}</option>'
@@ -307,6 +384,7 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
   <div class="collect-main">
     <h2 class="section">Job collection <span class="state state-{esc(st["state"])}" data-collect-state>{esc(labels.get(st["state"], st["state"]))}</span></h2>
     {notice_html}
+    {success}
     <p class="collect-msg" data-collect-text>{esc(st.get("message") or "")}</p>
     {counts}
     {progress}
@@ -389,7 +467,7 @@ def render_summary(rows_all: int, page: Page, cards: dict[str, int], f: Filters,
     else:
         body = "\n".join(_row_html(r, f, now, here) for r in page.rows)
         table = f"""<div class="tablewrap"><table class="jobs">
-<thead><tr><th></th><th>{_sort_header(f, "Job title", "title")}</th><th>{_sort_header(f, "Company", "company")}</th><th>Company Reviews</th>
+<thead><tr><th></th><th>{_sort_header(f, "Job title", "title")}</th><th>{_sort_header(f, "Company", "company")}</th><th>Recruiter contact</th><th>Company Reviews</th>
 <th>Location</th><th>Industry</th><th>Employment type</th><th>{_sort_header(f, "Posted", "recent", "oldest")}</th><th>Source</th><th></th></tr></thead>
 <tbody>
 {body}
@@ -408,7 +486,8 @@ def render_summary(rows_all: int, page: Page, cards: dict[str, int], f: Filters,
         showing += (f". {hidden_by_scope} other collected job{'s' if hidden_by_scope != 1 else ''} "
                     f"{'are' if hidden_by_scope != 1 else 'is'} hidden by the location scope")
     body = f"""
-<h1 class="page-title">Vacancies</h1>
+<div class="titlebar"><h1 class="page-title">Vacancies</h1>
+<span class="btn-row"><a class="btn" href="/export.csv" download title="Download every eligible vacancy with all its details, newest first">Export CSV</a></span></div>
 <p class="lede">Jobs collected from public job sites. The numbers below follow your filters.</p>
 {_collection_panel(collection, here, now, notice)}
 {_result_banner(result_set, f)}
@@ -421,6 +500,14 @@ def render_summary(rows_all: int, page: Page, cards: dict[str, int], f: Filters,
 
 
 # ---------------------------------------------------------------- page 2
+def _hq_dd(r: Row) -> str:
+    if r.hq_status == "outside":
+        return f'Outside India ({esc(r.hq_country)})<span class="sub">Evidence: {esc(r.hq_evidence)}</span>'
+    if r.hq_status == "india":
+        return f'India<span class="sub">Evidence: {esc(r.hq_evidence)}</span>'
+    return '<span class="na">Unknown</span><span class="sub">No reliable evidence of where the parent company is headquartered</span>'
+
+
 def _industry_dd(r: Row) -> str:
     if r.industry == "Unknown":
         return '<span class="na">Unknown</span><span class="sub">The source did not state an industry</span>'
@@ -511,6 +598,7 @@ def _details_table(r: Row, now: datetime) -> str:
         _row("Job title", esc(r.title) if r.title else na("Untitled vacancy")),
         _row("Designation", designation),
         _row("Industry", _industry_dd(r)),
+        _row("Parent company headquarters", _hq_dd(r)),
         _row("Location", or_na(r.location)),
         _row("Work mode", work_mode),
         _group("Posting"),
@@ -533,7 +621,7 @@ def _details_table(r: Row, now: datetime) -> str:
         _row("Required qualifications and skills", _bullets(_with_structured(sec.qualifications, r.education_structured or r.education), "Not available")),
         _row("Experience required", _bullets(_with_structured(sec.experience, r.experience_structured or r.experience_text), "Not available")),
         *([_row("Key skills", esc(", ".join(r.skills)))] if r.skills else []),
-        *_contact_rows(r),
+        *_contact_rows(r), *_hiring_contact_rows(r),
     ])
     return (f'<table class="details" aria-label="Vacancy details"><tbody>{rows}</tbody></table>'
             '<p class="sub mt14">Summary, responsibilities, qualifications and experience are copied word for word from the posted '
@@ -564,11 +652,12 @@ def _workspace(r: Row, back_q: str, notes_when, link: str) -> str:
 
 def render_detail(r: Row, back_q: str, now: datetime, run: Optional[dict], banner: Optional[str] = None) -> str:
     back = "/?" + back_q if back_q else "/"
+    back_label = "Back to vacancies"
     link = (f'<a class="btn btn-primary" href="{esc(r.job_url)}" target="_blank" rel="noopener noreferrer">Open Original Job</a>'
             if r.job_url else '<span class="btn" aria-disabled="true">Original link not available</span>')
     notes_when = lambda iso: (lambda dt: f"{dt.day} {dt:%b %Y, %H:%M} {settings.DISPLAY_TZ_LABEL}")(vm.to_display_tz(vm.parse_iso_datetime(iso) or now))
     body = f"""
-<nav class="crumbs"><a href="{esc(back)}">Back to vacancies</a></nav>
+<nav class="crumbs"><a href="{esc(back)}">{back_label}</a></nav>
 <div class="detail-grid">
 <div>
   <article class="panel job-head">

@@ -27,10 +27,11 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from collectors.registry import is_location_independent
 from config import locations as loc_config
 from config import settings
 from dashboard import viewmodel as vm
@@ -155,6 +156,7 @@ class CollectionManager:
         self._thread: Optional[threading.Thread] = None
         self._status_path = self.data_dir / "collection_status.json"
         self._lock_path = self.data_dir / "collection.lock"
+        self._cooldown_path = self.data_dir / "source_cooldown.json"
         self._last_write = 0.0
         self._interrupted_since: Optional[datetime] = None
         self._s: dict[str, Any] = self._load()
@@ -353,6 +355,16 @@ class CollectionManager:
             return False, "Choose one or more of the listed sources."
         fetch_filters = vm.clean_fetch_filters(filters)
         chosen = [n for n in names if n in asked]          # always run in the order the form lists them
+        cooling = {c: self.cooling_until(c) for c in chosen}
+        wait_note = ""
+        if any(cooling.values()):
+            fmt = lambda t: vm.to_display_tz(t).strftime("%H:%M") + f" {settings.DISPLAY_TZ_LABEL}"
+            held = [f"{names[c]} (until {fmt(u)})" for c, u in cooling.items() if u]
+            chosen = [c for c in chosen if not cooling[c]]
+            if not chosen:
+                return False, (f"{', '.join(held)} is being rested for a short while before the next search. "
+                               "Use Show saved vacancies meanwhile.")
+            wait_note = f" Not searched, resting after a block: {', '.join(held)}."
         chosen_display = [names[c] for c in chosen]
         label_map = {"employment": "Employment", "work_mode": "Work mode", "state": "State", "contact": "Contact details"}
         match_note = (" Only vacancies matching: " + ", ".join(f"{label_map[k]} = {v}" for k, v in fetch_filters.items()) + ".") if fetch_filters else ""
@@ -367,8 +379,8 @@ class CollectionManager:
                            skipped_not_relevant=0, skipped_out_of_scope=0, skipped_filters=0, fetch_filters=fetch_filters, per_source={}, stop_reason=None, last_summary=None,
                            current_search=None, started_at=self.now().isoformat(timespec="seconds"), finished_at=None,
                            last_error=None, warnings=[], log_tail=[],
-                           message=(f"Collecting the {target} most recent vacancies ({settings.COLLECTION_WINDOWS[window][1].lower()}, {loc_config.SCOPES[scope]}).{match_note} This can take a while."
-                                    if target else f"Collecting all eligible vacancies ({settings.COLLECTION_WINDOWS[window][1].lower()}, {loc_config.SCOPES[scope]}), within the dashboard's search limits.{match_note} This can take a while."))
+                           message=(f"Collecting the {target} most recent vacancies ({settings.COLLECTION_WINDOWS[window][1].lower()}, {loc_config.SCOPES[scope]}).{match_note}{wait_note} This can take a while."
+                                    if target else f"Collecting all eligible vacancies ({settings.COLLECTION_WINDOWS[window][1].lower()}, {loc_config.SCOPES[scope]}), within the dashboard's search limits.{match_note}{wait_note} This can take a while."))
             self._save(force=True)
         if self.background:
             self._thread = threading.Thread(target=self._run, args=(scope, target, window, chosen, fetch_filters), name="orbit-collection", daemon=True)
@@ -378,6 +390,38 @@ class CollectionManager:
         return True, "Collection started."
 
     # ------------------------------------------------------------ the run
+    # ------------------------------------------------------------ cooldown after a block
+    def _cooldowns(self) -> dict[str, datetime]:
+        try:
+            raw = json.loads(self._cooldown_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        out = {}
+        for src, iso in (raw if isinstance(raw, dict) else {}).items():
+            when = parse_iso_datetime(iso) if isinstance(iso, str) else None
+            if when is not None:
+                out[str(src).lower()] = when
+        return out
+
+    def cooling_until(self, src: str) -> Optional[datetime]:
+        """When this source may be tried again after it refused us, or None when it is free to run. Trying sooner only keeps the block alive."""
+        blocked_at = self._cooldowns().get(src.lower())
+        if blocked_at is None:
+            return None
+        until = blocked_at + timedelta(minutes=float(settings.SOURCE_COOLDOWN_MINUTES))
+        return until if until > self.now() else None
+
+    def _record_block(self, src: str) -> None:
+        data = {k: v.isoformat(timespec="seconds") for k, v in self._cooldowns().items()}
+        data[src.lower()] = self.now().isoformat(timespec="seconds")
+        try:
+            self._cooldown_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._cooldown_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            tmp.replace(self._cooldown_path)
+        except OSError as exc:
+            log.warning("Could not record the cooldown: %s", exc)
+
     def _update(self, **kw: Any) -> None:
         with self._mutex:
             self._s.update(kw)
@@ -419,6 +463,10 @@ class CollectionManager:
         sources = sources or ["linkedin"]
         pretty = {n.lower(): n for n in settings.SUPPORTED_SOURCES}
         places = loc_config.search_locations(scope)
+
+        def places_for(src: str) -> list[str]:
+            """A source that reads companies' careers pages does not depend on the city, so it is searched once, not once per place."""
+            return places[:1] if is_location_independent(src) else places
         days, window_label = (settings.COLLECTION_WINDOWS[window] if window else (settings.COLLECTION_DAYS, ""))
         within = f" posted in the {window_label.lower()}" if window_label else ""
         totals = {"collected": 0, "new": 0, "existing": 0, "duplicates_in_file": 0}
@@ -441,7 +489,8 @@ class CollectionManager:
             rec = e.get("record") or {}
             bad = False
             if only_relevant and not classify(rec.get("company"), rec.get("title"), rec.get("description"), rec.get("industries"),
-                                              posted_by=rec.get("posted_by"), company_url=rec.get("company_url")).eligible:
+                                              posted_by=rec.get("posted_by"), company_url=rec.get("company_url"),
+                                              location=rec.get("location")).eligible:
                 bad = True
             if not bad and scope in ("india", "international"):
                 loc_text = rec.get("location")
@@ -568,7 +617,7 @@ class CollectionManager:
             if True:
                 label = pretty.get(src, src)
                 src_stop = False
-                for n, place in enumerate(places):
+                for n, place in enumerate(places_for(src)):
                     if src_reached(src) or src_stop or interrupted or timed_out:
                         break
                     rounds = 0
@@ -582,7 +631,7 @@ class CollectionManager:
                         progress = f" - {len(merged())} of {target} vacancies so far" if target else ""
                         where = f"{label}: " if len(sources) > 1 else ""
                         done_by[src] = n
-                        self._update(search_done=sum(done_by.values()), search_total=len(places) * len(sources), current_search=place,
+                        self._update(search_done=sum(done_by.values()), search_total=sum(len(places_for(s)) for s in sources), current_search=place,
                                      step="collecting", current_page=0, listings_on_page=0,
                                      message=f"Collecting jobs ({loc_config.SCOPES[scope]}): {where}{place}{progress}")
                         captured: dict[str, Any] = {}
@@ -666,6 +715,7 @@ class CollectionManager:
                             problems.append(f"{(label + ' - ') if len(sources) > 1 else ''}{place}: no jobs file was saved.")
                         if code == EXIT_BLOCKED:
                             blocked_srcs.append(label)
+                            self._record_block(src)
                             blocked_why[label] = short_reason(captured.get("blocked"))
                             problems.append(f"{label} blocked: {blocked_why[label]}. Not retried.")
                             src_stop = True
@@ -722,7 +772,7 @@ class CollectionManager:
                 skipped_note += " By source: " + "; ".join(
                     f"{name} {c['in_result']} shown of {c['found'] + c['already']} found" if target else f"{name} {c['new'] + c['existing']} collected of {c['found'] + c['already']} found"
                     for name, c in ps.items()) + "."
-            total_places = len(places) * len(sources)
+            total_places = sum(len(places_for(s)) for s in sources)
             if blocked:
                 self._update(state=PARTIAL, step=None, finished_at=finished, last_summary=summary, search_done=sum(done_by.values()), stop_reason="blocked",
                              last_error=(f"{names} started refusing requests, so that source stopped ({'; '.join(f'{k}: {v}' for k, v in blocked_why.items())}). "
@@ -732,7 +782,7 @@ class CollectionManager:
                                          + ("" if any(b in settings.SOURCE_BLOCK_ADVICE for b in blocked_srcs)
                                             else " Try again later, or check with verify_sources.py --visible.")),
                              warnings=(self._s["warnings"] + problems)[:12],
-                             message=f"Collection could not continue: {names} refused further requests. Got {got} vacancies.{skipped_note}", **extra)
+                             message=f"Collection finished. Got {got} vacancies.{skipped_note}", **extra)
             elif interrupted:
                 self._update(state=PARTIAL, step=None, finished_at=finished, last_summary=summary, search_done=sum(done_by.values()), stop_reason="interrupted",
                              last_error="The collection was interrupted. Jobs saved before the interruption were added.",

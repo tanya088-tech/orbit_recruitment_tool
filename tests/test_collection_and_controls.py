@@ -391,7 +391,7 @@ def test_demo_data_builds_and_covers_scopes_industries_and_work_modes(tmp_path):
     rows = vm.build_rows(history.list_jobs(), {}, None)
     f = lambda **q: vm.apply_filters(rows, vm.Filters.from_query(q), NOW.replace(year=2026) + timedelta(days=0))
     assert {r.scope for r in rows} == {"india", "outside", "unknown"}
-    assert {"IT & Software", "Healthcare & Pharma", "Banking & Finance", "Unknown"} <= {r.industry for r in rows}
+    assert {"IT & Software Services", "Healthcare & Hospitals", "Banking, Financial Services & Insurance (BFSI)", "Unknown"} <= {r.industry for r in rows}
     assert {"Hybrid", "On-site", "Remote"} <= {r.work_mode for r in rows}
     assert len(f(scope="all")) == len(rows) and 0 < len(f(scope="outside")) < len(rows)
 

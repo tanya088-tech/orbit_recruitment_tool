@@ -265,3 +265,80 @@ US_STATES = {
     "tennessee", "texas", "utah", "vermont", "virginia", "washington", "west virginia",
     "wisconsin", "wyoming",
 }
+
+
+# --------------------------------------------------------------------------------------
+# HEADQUARTERS (the client's rule: only GCC / BFSI employers headquartered OUTSIDE India qualify, for vacancies in India)
+# --------------------------------------------------------------------------------------
+# Reference list of well-known employers whose group headquarters is outside India: (name pattern, headquarters country).
+# It supplies the HEADQUARTERS evidence only. The employer must still show GCC or BFSI evidence of its own (its industry,
+# or - for a non-BFSI group - the posting describing the India unit as a capability / captive / shared-services centre).
+# A company that is not listed needs a headquarters statement in its job description (see HQ_* below). Edit freely.
+OVERSEAS_HQ_EMPLOYERS = [
+    # banks, insurers, asset managers, payments / market infrastructure
+    (r"\bwells fargo\b", "United States"), (r"\bjp ?morgan", "United States"), (r"\bciti(group|bank)?\b", "United States"),
+    (r"\bbank of america\b", "United States"), (r"\bgoldman sachs\b", "United States"), (r"\bmorgan stanley\b", "United States"),
+    (r"\bu\.?s\.? bancorp\b|\bu\.?s\.? bank\b", "United States"), (r"\bbny\b|\bbank of new york\b", "United States"),
+    (r"\bstate street\b", "United States"), (r"\bnorthern trust\b", "United States"), (r"\bcapital one\b", "United States"),
+    (r"\bsynchrony\b", "United States"), (r"\bamerican express\b|\bamex\b", "United States"), (r"\bmastercard\b", "United States"),
+    (r"\bpaypal\b", "United States"), (r"\bvanguard\b", "United States"), (r"\bblackrock\b", "United States"),
+    (r"\bblackstone\b", "United States"), (r"\bjefferies\b", "United States"), (r"\bfirst citizens\b", "United States"),
+    (r"\bfidelity investments\b|\bfmr\b", "United States"), (r"\bcharles schwab\b", "United States"), (r"\bpnc\b", "United States"),
+    (r"\btruist\b", "United States"), (r"\bdiscover financial\b", "United States"), (r"\bfiserv\b", "United States"),
+    (r"\bprudential financial\b", "United States"), (r"\bmetlife\b", "United States"), (r"\baig\b", "United States"),
+    (r"\bhsbc\b", "United Kingdom"), (r"\bbarclays\b", "United Kingdom"), (r"\bstandard chartered\b", "United Kingdom"),
+    (r"\bnatwest\b|\broyal bank of scotland\b", "United Kingdom"), (r"\blloyds banking\b|\blloyds bank\b", "United Kingdom"),
+    (r"\brevolut\b", "United Kingdom"), (r"\boaknorth\b", "United Kingdom"), (r"\bbarclaycard\b", "United Kingdom"),
+    (r"\bprudential plc\b", "United Kingdom"),
+    (r"\bdeutsche bank\b", "Germany"), (r"\ballianz\b", "Germany"),
+    (r"\bbnp paribas\b", "France"), (r"\bsoci[eé]t[eé] g[eé]n[eé]rale\b|\bsocgen\b", "France"), (r"\baxa\b", "France"),
+    (r"\bcr[eé]dit agricole\b", "France"),
+    (r"\bubs\b", "Switzerland"), (r"\bcredit suisse\b", "Switzerland"), (r"\bchubb\b", "Switzerland"), (r"\bzurich insurance\b", "Switzerland"),
+    (r"\bing (bank|groep|group)\b", "Netherlands"), (r"\babn amro\b", "Netherlands"), (r"\brabobank\b", "Netherlands"),
+    (r"\bsantander\b", "Spain"), (r"\bbbva\b", "Spain"),
+    (r"\bdbs\b", "Singapore"), (r"\bocbc\b", "Singapore"), (r"\buob\b", "Singapore"),
+    (r"\bmizuho\b", "Japan"), (r"\bmufg\b|\bmitsubishi ufj\b", "Japan"), (r"\bsmbc\b|\bsumitomo mitsui\b", "Japan"), (r"\bnomura\b", "Japan"),
+    (r"\banz\b", "Australia"), (r"\bcommonwealth bank\b", "Australia"), (r"\bmacquarie\b", "Australia"),
+    (r"\bnational australia bank\b|\bnab\b", "Australia"), (r"\bwestpac\b", "Australia"),
+    (r"\bcibc\b", "Canada"), (r"\broyal bank of canada\b|\brbc\b", "Canada"), (r"\bscotiabank\b", "Canada"),
+    (r"\btd bank\b|\btoronto[- ]dominion\b", "Canada"), (r"\bmanulife\b", "Canada"), (r"\bsun life\b", "Canada"),
+    (r"\bmashreq\b", "United Arab Emirates"), (r"\bemirates (nbd|islamic)\b", "United Arab Emirates"),
+    # groups outside banking that run well-known India capability centres (still need GCC evidence in the posting)
+    (r"\bwalmart\b", "United States"), (r"\btarget\b", "United States"), (r"\blowe'?s\b", "United States"), (r"\bhome depot\b", "United States"),
+    (r"\bbest buy\b", "United States"), (r"\bnike\b", "United States"), (r"\bgeneral electric\b|\bge (aerospace|vernova|healthcare)\b", "United States"),
+    (r"\bhoneywell\b", "United States"), (r"\bford\b", "United States"), (r"\bgeneral motors\b", "United States"),
+    (r"\bcaterpillar\b", "United States"), (r"\bcisco\b", "United States"), (r"\bmicrosoft\b", "United States"),
+    (r"\bintel\b", "United States"), (r"\bqualcomm\b", "United States"), (r"\btexas instruments\b", "United States"),
+    (r"\bdell\b", "United States"), (r"\bhp inc\b|\bhewlett", "United States"), (r"\bibm\b", "United States"),
+    (r"\boracle\b", "United States"), (r"\badobe\b", "United States"), (r"\bsalesforce\b", "United States"),
+    (r"\bpfizer\b", "United States"), (r"\bjohnson & johnson\b|\bj&j\b", "United States"), (r"\bmerck\b", "United States"),
+    (r"\bsiemens\b", "Germany"), (r"\bbosch\b", "Germany"), (r"\bsap\b", "Germany"), (r"\bphilips\b", "Netherlands"),
+    (r"\bnovartis\b", "Switzerland"), (r"\broche\b", "Switzerland"), (r"\bnestl[eé]\b", "Switzerland"),
+    (r"\bgsk\b|\bglaxosmithkline\b", "United Kingdom"), (r"\bastrazeneca\b", "United Kingdom"), (r"\bunilever\b", "United Kingdom"),
+    (r"\bshell\b", "United Kingdom"), (r"\bbp\b", "United Kingdom"), (r"\bairbus\b", "France"),
+]
+# Employers headquartered in India. They never qualify unless the posting itself names an overseas headquarters.
+INDIA_HQ_EMPLOYERS = [
+    r"\bhdfc\b", r"\bicici\b", r"\bkotak\b", r"\bsbi\b", r"\bstate bank of india\b", r"\bidfc\b", r"\baxis bank\b", r"\byes bank\b",
+    r"\bbajaj\b", r"\bjana small\b", r"\bau small finance\b", r"\bujjivan\b", r"\bequitas\b", r"\besaf\b", r"\bdcb bank\b",
+    r"\brbl bank\b", r"\bcsb bank\b", r"\bbandhan\b", r"\bindusind\b", r"\bfederal bank\b", r"\bpunjab national\b", r"\bbank of baroda\b",
+    r"\bcanara\b", r"\bunion bank of india\b", r"\bindian bank\b", r"\bmuthoot\b", r"\bmanappuram\b", r"\bshriram\b", r"\bchola\w*\b",
+    r"\baditya birla\b", r"\bmax life\b", r"\blic\b", r"\btata\b", r"\breliance\b", r"\bmahindra\b", r"\bsharekhan\b", r"\bedelweiss\b",
+    r"\bjm financial\b", r"\bpaytm\b", r"\bphonepe\b", r"\bairtel\b", r"\bsbicap\b|\bsbi card\b|\bsbi life\b", r"\bnaukri\b", r"\bindbank\b",
+]
+# Statements in the job description that name where the group is headquartered. The place found is checked: an Indian place
+# means India-headquartered, a foreign country / city / US state means overseas.
+HQ_STATEMENT_PATTERNS = [
+    r"\b(?:global |corporate |group |worldwide )?head ?quarter(?:ed|s)?\s*(?:is |are |being )?(?:located )?(?:in|at|:)\s+(?P<place>[^.;\n]{2,80})",
+    r"\bparent (?:company|organi[sz]ation|group)[^.;\n]{0,80}?(?:based|headquartered|located) in\s+(?P<place>[^.;\n]{2,60})",
+    r"\bheadquarters? (?:of|for) (?:the |our )?(?:group|firm|company|bank)[^.;\n]{0,40}?(?:in|at)\s+(?P<place>[^.;\n]{2,60})",
+]
+# "a US-based bank", "German based company": a nationality / country before based|headquartered|owned.
+HQ_ADJECTIVE_PATTERN = (r"\b(?P<c>u\.?s\.?a?\.?|american|u\.?k\.?|british|german|french|swiss|dutch|japanese|singapore(?:an)?|canadian|"
+                        r"australian|irish|swedish|spanish|italian|european|emirati|korean|chinese)[- ]+(?:based|headquartered|owned)\b")
+HQ_FOREIGN_CITIES = {
+    "new york", "san francisco", "chicago", "charlotte", "boston", "dallas", "houston", "seattle", "atlanta", "los angeles", "washington",
+    "minneapolis", "san jose", "austin", "london", "manchester", "edinburgh", "paris", "frankfurt", "berlin", "munich", "zurich", "geneva",
+    "amsterdam", "dublin", "madrid", "toronto", "montreal", "vancouver", "sydney", "melbourne", "tokyo", "osaka", "seoul", "shanghai",
+    "singapore", "hong kong", "dubai", "abu dhabi", "doha", "riyadh", "stockholm", "copenhagen", "brussels", "milan", "luxembourg", "basel",
+}

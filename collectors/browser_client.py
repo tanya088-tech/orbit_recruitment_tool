@@ -20,7 +20,7 @@ import time
 from typing import Any, Callable, Optional
 from urllib.parse import urlencode, urlsplit
 
-from collectors.errors import BlockedError, FetchError, NotFoundError, SetupError
+from collectors.errors import BlockedError, FetchError, LocalBrowserError, NotFoundError, SetupError
 from config import settings
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,22 @@ def looks_blocked(title: str, html: str) -> bool:
 
 
 _GATE_PATH = re.compile(r"/(auth|login|nlogin|signin|sign-in|authwall|captcha|challenge|verify|checkpoint)(?:[/;?]|$)", re.I)
+
+
+_CRASH_MARKERS = ("page crashed", "target closed", "targetclosederror", "has been closed", "frame was detached",
+                   "browser has disconnected", "execution context was destroyed")
+_NETWORK_MARKERS = ("err_network_changed", "err_internet_disconnected", "err_network_io_suspended")
+
+
+def local_failure_kind(exc: BaseException) -> Optional[str]:
+    """'crash' / 'network' when a failed page load was caused by OUR browser or connection (not by the site); else None.
+    Only clear local symptoms count. Resets, timeouts and HTTP errors still go through the normal failure path."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    if any(m in text for m in _NETWORK_MARKERS):
+        return "network"
+    if any(m in text for m in _CRASH_MARKERS):
+        return "crash"
+    return None
 
 
 def redirected_to_gate(requested: str, final: str) -> bool:
@@ -117,6 +133,25 @@ class BrowserClient:
             raise SetupError(f"{INSTALL_HELP} (details: {type(exc).__name__}: {str(exc)[:160]})") from exc
         return self._page
 
+    def _recover_page(self) -> None:
+        """Replace a crashed / closed page with a fresh one in the same browser (same profile and cookies).
+        If the browser itself is gone, drop it so the next _open() starts it again. Never touches the site."""
+        old, self._page = self._page, None
+        try:
+            if old is not None and hasattr(old, "close"):
+                old.close()
+        except Exception:
+            pass
+        if self._ctx is not None:
+            try:
+                self._page = self._ctx.new_page()
+                if settings.BROWSER_MINIMIZE_WINDOW and not settings.BROWSER_HEADLESS:
+                    self._minimize(self._page)
+                return
+            except Exception as exc:
+                log.warning("could not open a new page in the browser (%s); restarting the browser", type(exc).__name__)
+                self.close()
+
     def _minimize(self, page: Any) -> None:
         """Minimize the collection window so it does not open in front of the dashboard. Best effort: if the browser
         refuses, the window simply stays where it is. It is still an ordinary browser window - nothing is hidden from the site."""
@@ -183,14 +218,31 @@ class BrowserClient:
         """Load `url`, wait for `wait_for` (a CSS selector) if given, click every `expand` button, return the HTML."""
         if params:
             url = f"{url}{'&' if '?' in url else '?'}{urlencode(params)}"
-        page = self._open()
-        self._throttle()
-        try:
-            resp = page.goto(url, wait_until="domcontentloaded", timeout=self.wait_ms * 2)
-        except Exception as exc:
-            self._last = time.monotonic()
-            raise FetchError(f"could not load {url}: {type(exc).__name__}: {str(exc)[:160]}; "
-                             f"{self.diagnose(page, url)}") from exc
+        local_failures = 0
+        while True:
+            page = self._open()
+            self._throttle()
+            try:
+                resp = page.goto(url, wait_until="domcontentloaded", timeout=self.wait_ms * 2)
+                break
+            except Exception as exc:
+                self._last = time.monotonic()
+                kind = local_failure_kind(exc)
+                if kind is None:
+                    raise FetchError(f"could not load {url}: {type(exc).__name__}: {str(exc)[:160]}; "
+                                     f"{self.diagnose(page, url)}") from exc
+                # Our own browser crashed or lost its network: that is not the site refusing us. Open a fresh page and
+                # load the same URL again (a couple of times, slowly); if it still fails it is reported as a local problem.
+                local_failures += 1
+                if local_failures > settings.BROWSER_RECOVERY_RETRIES:
+                    raise LocalBrowserError(f"the browser on this computer failed ({kind}); the site did not refuse anything. "
+                                            f"{url}: {type(exc).__name__}: {str(exc)[:120]}") from exc
+                wait = settings.BROWSER_RECOVERY_WAIT * (local_failures * 3 if kind == "network" else 1)
+                log.warning("Browser %s while loading a page (%s); re-opening it and trying again in %.0fs (%d/%d)",
+                            kind, type(exc).__name__, wait, local_failures, settings.BROWSER_RECOVERY_RETRIES)
+                self._sleep(wait)
+                if kind == "crash":
+                    self._recover_page()
         self._last = time.monotonic()
         status = getattr(resp, "status", 200) if resp is not None else 200
         if status in (404, 410):

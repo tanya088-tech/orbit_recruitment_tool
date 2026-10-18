@@ -139,3 +139,34 @@ def test_sequential_when_parallel_switched_off(tmp_path):
     finally:
         settings.COLLECTION_PARALLEL_SOURCES = old
     assert peak[0] == 1
+
+
+def test_request_pacing_is_short_and_staffing_employers_are_not_opened():
+    from config import settings
+    from processing.classifier import employer_can_never_qualify as never
+    assert settings.REQUEST_DELAY_MAX <= 3.5 and settings.REQUEST_DELAY_MIN < settings.REQUEST_DELAY_MAX
+    assert never("Randstad India Staffing Solutions") and never("Confidential") and not never("HSBC Technology India")
+
+
+def test_card_prefilter_skips_the_detail_download_for_staffing_cards():
+    from collectors.linkedin import source as src
+    from config import settings
+    from models.job import RunStats, SearchParams
+    opened = []
+
+    class Client:
+        def get(self, url, params=None):
+            opened.append(url)
+            raise RuntimeError("stop")
+
+    stubs = [{"job_id": "1", "company": "Acme Staffing Services", "title": "t", "posted_date": None, "posted_age_text": "1 hour ago",
+              "job_url": "u1", "location": "Pune", "company_url": None, "raw": ""}]
+    orig = src.parse_search_results, settings.COLLECTION_SKIP_INELIGIBLE_BEFORE_FETCH
+    src.parse_search_results = lambda html: stubs if not opened[1:] and len(opened) < 2 else []
+    settings.COLLECTION_SKIP_INELIGIBLE_BEFORE_FETCH = True
+    try:
+        list(src.LinkedInSource(client=type("C", (), {"get": lambda self, url, params=None: (opened.append(url) or "<x/>")})()).search(
+            SearchParams(keywords="k", location="Pune", days=30, max_jobs=0, max_pages=2), RunStats()))
+    finally:
+        src.parse_search_results, settings.COLLECTION_SKIP_INELIGIBLE_BEFORE_FETCH = orig
+    assert all("jobPosting" not in u for u in opened)       # only the search page was requested

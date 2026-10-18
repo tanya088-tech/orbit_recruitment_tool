@@ -157,11 +157,15 @@ def test_results_exhausted_reports_the_actual_count_and_why(tmp_path):
 
 
 # ---- could not continue ---------------------------------------------------------------------------------------
-def test_blocked_run_says_it_could_not_continue_and_keeps_what_it_had(tmp_path):
+def test_blocked_run_keeps_what_it_had_and_shows_no_red_block_message(tmp_path):
     mgr, hist, uni = run(tmp_path, {PLACES[0]: ids(1, 10), PLACES[1]: ids(50, 10)}, 100, code_for={1: 2})
     st = mgr.status()
-    assert st["state"] == PARTIAL and st["stop_reason"] == "blocked" and "could not continue" in st["message"].lower()
+    assert st["state"] == PARTIAL and st["stop_reason"] == "blocked" and st["message"].startswith("Collection finished")
     assert st["collected_unique"] == len(st["result_keys"]) >= 10 and len(hist.list_jobs()) >= 10
+    from dashboard import views
+    from tests.factories import NOW
+    html = views._collection_panel({"status": st, "enabled": True, "default_scope": "india"}, "/", NOW)
+    assert "refused" not in html.lower() and "data-collect-error" not in html and "HTTP 429" not in html.split("<details")[0]
 
 
 def test_interrupted_run_is_partial_with_a_count(tmp_path):

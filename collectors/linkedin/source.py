@@ -10,6 +10,7 @@ from collectors.linkedin.client import HttpClient
 from collectors.linkedin.detail_parser import parse_job_detail
 from collectors.linkedin.search_parser import parse_search_results
 from config import settings
+from processing.classifier import employer_can_never_qualify
 from models.job import Job, RunStats, SearchParams
 from utils.dates import is_within_days, parse_posted_date
 
@@ -96,6 +97,9 @@ class LinkedInSource(JobSource):
                     stats.skipped_out_of_range += 1
                     continue
 
+                if settings.COLLECTION_SKIP_INELIGIBLE_BEFORE_FETCH and stub.get("company") and employer_can_never_qualify(stub["company"]):
+                    log.info("Not opening %s: %s can never qualify", stub["job_url"], stub["company"])
+                    continue
                 try:
                     job = self._collect_one(stub)
                 except BlockedError:

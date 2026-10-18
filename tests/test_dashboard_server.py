@@ -70,9 +70,9 @@ def test_summary_page_has_cards_filters_table_and_security_headers(tmp_path):
         assert status == 200 and "script-src 'self'" in headers["content-security-policy"]
         for label in ["Total openings", "Permanent openings", "Contract openings"]:
             assert f"<span>{label}</span>" in html, label
-        for label in ["Location scope", "State", "Employment type", "Work mode"]:
+        for label in ["Location scope", "State", "Employment type", "Work mode", "Source"]:
             assert f">{label}</label>" in html, label
-        for gone in ['for="f-source"', 'for="f-posted"', "Job posted</label>"]:
+        for gone in ['for="f-posted"', "Job posted</label>"]:
             assert gone not in html, gone
         for gone in ["Company</label>", "Job title or keyword", "GCC / BFSI", "GCC vacancies", "BFSI vacancies", "New vacancies", "Recruitment status"]:
             assert gone not in html, gone
@@ -110,8 +110,9 @@ def test_filters_over_http(tmp_path):
     with running(tmp_path) as (port, _):
         t = lambda q: set(titles(get(port, "/?" + q)[2]))
         # Source and Job posted are no longer dashboard filters: links that still carry them show everything
-        for gone in ("posted=24h", "posted=3d", "source=Naukri", "source=LinkedIn&posted=24h"):
+        for gone in ("posted=24h", "posted=3d"):
             assert row_count(get(port, "/?" + gone)[2]) == 6, gone
+        assert row_count(get(port, "/?source=Naukri")[2]) == 0 and row_count(get(port, "/?source=LinkedIn")[2]) == 6     # the Source filter works
         assert t("work_mode=Remote") == {"Payments Associate"} and row_count(get(port, "/?employment=Remote")[2]) == 6
         assert t("employment=Contract") == {"KYC Analyst", "Insurance Underwriter"}
         assert row_count(get(port, "/?state=Maharashtra&employment=Permanent")[2]) == 2
@@ -154,7 +155,7 @@ def test_details_page_shows_every_required_field(tmp_path):
     with running(tmp_path) as (port, _):
         status, _, html = get(port, f"/job/{KEYS['A']}")
         assert status == 200
-        for needle in ["Credit Risk Analyst", "Acme Bank", "Pune, Maharashtra, India", "Banking &amp; Finance", "Financial Services", "Permanent",
+        for needle in ["Credit Risk Analyst", "Acme Bank", "Pune, Maharashtra, India", "Banking, Financial Services &amp; Insurance (BFSI)", "Financial Services", "Permanent",
                        "LinkedIn", "1001", "Just now", "Estimated from the source", "Open Original Job", "Original job URL",
                        "Job summary", "Full job description", "Save job", "Recruitment status", "Add a note"]:
             assert needle in html, needle

@@ -28,16 +28,17 @@ import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, quote, urlsplit, unquote
 
 from config import locations as loc_config
 from config import settings
 from dashboard import branding
 from dashboard import viewmodel as vm
-from dashboard import views
+from dashboard import export, views
 from dashboard.collection import parse_target
 from store.base import JobHistoryStore, RecruiterStateStore, StoreError
+from store.json_store import MemoryPosterEntries
 
 log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
@@ -57,9 +58,10 @@ class DashboardApp:
     def __init__(self, history: JobHistoryStore, state: RecruiterStateStore,
                  now_fn: Optional[Callable[[], datetime]] = None, banner: Optional[str] = None,
                  collection=None, restart_fn: Optional[Callable[[], None]] = None,
-                 static_dir: Optional[Path] = None) -> None:
+                 static_dir: Optional[Path] = None, posters: Any = None) -> None:
         self.history, self.state, self.banner = history, state, banner
         self.collection, self.restart_fn = collection, restart_fn
+        self.posters = posters if posters is not None else MemoryPosterEntries()
         self.boot_id = uuid.uuid4().hex          # changes with every process start: the restart page waits for a different one
         self.static_dir = Path(static_dir) if static_dir else STATIC_DIR
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
@@ -76,8 +78,12 @@ class DashboardApp:
         return self._now()
 
     def rows(self) -> list[vm.Row]:
+        """The Vacancies list."""
         run = self.history.latest_run()
-        return vm.build_rows(self.history.list_jobs(), self.state.get_all(), run["run_id"] if run else None)
+        return vm.build_rows(self.history.list_jobs(), self.state.get_all(), run["run_id"] if run else None, team_posters=self.posters.get_all())
+
+    def find_row(self, key: str) -> Optional[vm.Row]:
+        return next((r for r in self.rows() if r.key == key), None)
 
 
 def safe_next(value: str, fallback: str = "/") -> str:
@@ -198,6 +204,11 @@ def make_handler(app: DashboardApp):
                 view = app.collection_view()
                 body = {k: v for k, v in view["status"].items() if k != "result_keys"}      # the key list can be long; the page does not poll it
                 return self._send(200, json.dumps(body).encode("utf-8"), "application/json; charset=utf-8")
+            if path == "/export.csv":
+                body = export.build_csv(app.rows())
+                stamp = app.now().strftime("%Y%m%d_%H%M")
+                return self._send(200, body, "text/csv; charset=utf-8",
+                                  {"Content-Disposition": f'attachment; filename="vacancies_{stamp}.csv"'})
             if path == "/":
                 return self._summary(params)
             m = _JOB.match(path)
@@ -240,7 +251,7 @@ def make_handler(app: DashboardApp):
             self._html(200, html_text)
 
         def _detail(self, key: str, params):
-            row = next((r for r in app.rows() if r.key == key), None)
+            row = app.find_row(key)
             if row is None:
                 return self._message(404, "Vacancy not found", "This vacancy is not in the history. It may have been removed.")
             back_q = safe_q((params.get("q") or [""])[0])

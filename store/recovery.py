@@ -66,7 +66,8 @@ def find_unprocessed(history: JobHistoryStore, output_dir: Path, since: Optional
         return []
     cutoff = since.timestamp() - 2          # allow a little clock/rounding slack
     done = _already_processed_inputs(history, output_dir)
-    files = [p for p in output_dir.glob("jobs_*_*.json") if p.stat().st_mtime >= cutoff and p.name not in done]
+    files = [p for p in output_dir.glob("jobs_*_*.json")
+             if p.stat().st_mtime >= cutoff and p.name not in done]
     return sorted(files, key=lambda p: (p.stat().st_mtime, p.name))
 
 

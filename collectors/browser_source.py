@@ -11,7 +11,7 @@ from typing import Any, Iterator, Optional
 
 from collectors.base import JobSource
 from collectors.browser_client import BrowserClient
-from collectors.errors import BlockedError, NotFoundError
+from collectors.errors import BlockedError, LocalBrowserError, NotFoundError
 from config import settings
 from models.job import Job, RunStats, SearchParams
 from utils.dates import is_within_days
@@ -52,6 +52,7 @@ class BrowserListSource(JobSource):
         seen_this_search: set[str] = set()
         collected_here = 0
         consecutive_failures = 0
+        browser_failures = 0          # pages in a row that failed because OUR browser failed (never counted as the site blocking us)
         days = self.effective_days(params)
         try:
             for page in range(params.max_pages):
@@ -97,6 +98,15 @@ class BrowserListSource(JobSource):
                         log.warning("Job removed or missing: %s (%s)", stub["job_url"], exc)
                         stats.record_failure(stub["job_url"], exc)
                         continue
+                    except LocalBrowserError as exc:
+                        log.error("Failed to collect %s: %s", stub["job_url"], exc)
+                        stats.record_failure(stub["job_url"], exc)
+                        browser_failures += 1
+                        if browser_failures >= settings.MAX_CONSECUTIVE_BROWSER_FAILURES:
+                            log.error("The browser keeps failing (%d pages in a row, even after re-opening it). Skipping the rest of "
+                                      "this place. This is a problem on this computer, not the site refusing us.", browser_failures)
+                            return
+                        continue
                     except Exception as exc:
                         if exc.__class__.__name__ == "SetupError":
                             raise
@@ -107,6 +117,7 @@ class BrowserListSource(JobSource):
                             raise BlockedError(f"{consecutive_failures} failures in a row - stopping to avoid hammering {self.name}")
                         continue
                     consecutive_failures = 0
+                    browser_failures = 0
                     if not is_within_days(job.posted_date, days):     # the exact date from the job page overrides the card's estimate
                         stats.skipped_out_of_range += 1
                         continue

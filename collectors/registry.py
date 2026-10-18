@@ -27,6 +27,11 @@ def get_source(name: str, **kwargs) -> JobSource:
         raise ValueError(f"Unknown source '{name}'. Available: {', '.join(available_sources())}")
 
 
+def is_location_independent(name: str) -> bool:
+    cls = _REGISTRY.get(str(name).lower())
+    return bool(cls and getattr(cls, "location_independent", False))
+
+
 def available_sources() -> list[str]:
     return sorted(_REGISTRY)
 

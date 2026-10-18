@@ -21,34 +21,42 @@ UNKNOWN, OTHER = "Unknown", "Other"
 # Order matters: more specific rules come before broader ones
 # (e.g. "Pharmaceutical Manufacturing" must be Healthcare before "Manufacturing").
 INDUSTRY_RULES: list[tuple[str, tuple[str, ...]]] = [
-    ("IT & Software", ("it services", "information technology", "software", "technology information", "internet",
-                       "computer", "data infrastructure", "cyber", "network security", "information services",
-                       "it system", "semiconductor")),
-    ("Healthcare & Pharma", ("hospital", "health care", "healthcare", "pharma", "biotech", "medical", "wellness and fitness",
-                             "mental health", "veterinary", "life sciences")),
-    ("Banking & Finance", ("bank", "financial", "insurance", "investment", "capital markets", "venture capital",
-                           "private equity", "asset management", "wealth", "fintech", "mortgage", "credit", "payments",
-                           "securities", "fund")),
-    ("Consulting & Professional Services", ("consulting", "accounting", "legal", "law practice", "professional services",
+    ("Pharmaceuticals & Life Sciences", ("pharma", "biotech", "life sciences", "medical device", "medical equipment", "biopharma",
+                                         "clinical research", "drug")),
+    ("Hospitality, Travel & Tourism", ("hospitality", "hotel", "travel", "restaurants", "leisure", "tourism")),
+    ("Healthcare & Hospitals", ("hospital", "health care", "healthcare", "medical", "wellness and fitness", "wellness",
+                                "mental health", "veterinary", "diagnostic", "nursing")),
+    ("Automotive & Auto Components", ("automotive", "motor vehicle", "auto component", "automobile", "vehicle", "two wheeler", "tyre", "tire")),
+    ("Oil, Gas & Energy", ("oil and gas", "oil energy", "petroleum", "utilities", "renewable", "energy", "power generation",
+                           "electric power", "solar")),
+    ("IT & Software Services", ("it services", "information technology", "software", "technology information", "internet",
+                                "computer", "data infrastructure", "cyber", "network security", "information services",
+                                "it system", "semiconductor")),
+    ("Banking, Financial Services & Insurance (BFSI)", ("bank", "financial", "insurance", "investment", "capital markets",
+                                                         "venture capital", "private equity", "asset management", "wealth",
+                                                         "fintech", "mortgage", "credit", "payments", "securities", "fund")),
+    ("Professional Services & Consulting", ("consulting", "accounting", "legal", "law practice", "professional services",
                                             "outsourcing", "business services", "market research", "research services",
-                                            "architecture and planning", "design services")),
-    ("Staffing & Recruiting", ("staffing", "recruiting", "executive search", "human resources")),
-    ("Retail & E-commerce", ("retail", "e commerce", "ecommerce", "wholesale", "consumer goods", "consumer services",
-                             "apparel", "fashion", "food and beverage", "supermarket", "luxury goods")),
-    ("Manufacturing & Industrial", ("manufacturing", "automotive", "motor vehicle", "machinery", "industrial", "chemical",
-                                   "electrical", "aviation and aerospace", "aerospace", "defense", "mining", "metal",
-                                   "steel", "textile", "packaging", "plastics", "paper")),
-    ("Energy & Utilities", ("oil and gas", "oil energy", "utilities", "renewable", "energy", "power generation", "electric power")),
-    ("Telecommunications", ("telecommunication", "wireless", "telecom")),
-    ("Education", ("education", "e learning", "university", "school", "training")),
-    ("Media & Entertainment", ("media", "entertainment", "publishing", "broadcast", "advertising", "marketing", "gaming",
-                               "animation", "film", "music")),
-    ("Real Estate & Construction", ("real estate", "construction", "civil engineering", "building", "facilities services")),
-    ("Transport & Logistics", ("transportation", "logistics", "supply chain", "airlines", "shipping", "freight", "warehousing",
-                               "maritime", "railroad", "trucking", "delivery")),
-    ("Travel & Hospitality", ("hospitality", "hotel", "travel", "restaurants", "leisure", "tourism")),
-    ("Government & Non-profit", ("government", "non profit", "nonprofit", "public policy", "civic", "public safety",
-                                 "international affairs", "military")),
+                                            "architecture and planning", "design services", "bpm", "bpo")),
+    ("FMCG & Consumer Goods", ("consumer goods", "fmcg", "food and beverage", "food production", "beverage", "personal care",
+                               "cosmetics", "household", "packaged", "tobacco")),
+    ("Retail & E-commerce", ("retail", "e commerce", "ecommerce", "wholesale", "consumer services", "apparel", "fashion",
+                             "supermarket", "luxury goods")),
+    ("Infrastructure, Construction & Real Estate", ("real estate", "construction", "civil engineering", "infrastructure", "building",
+                                                    "facilities services")),
+    ("Logistics, Supply Chain & Transportation", ("transportation", "logistics", "supply chain", "airlines", "shipping", "freight",
+                                                  "warehousing", "maritime", "railroad", "trucking", "delivery", "courier")),
+    ("Education & EdTech", ("education", "edtech", "e learning", "university", "school", "training")),
+    ("Manufacturing & Industrial Engineering", ("manufacturing", "machinery", "industrial", "chemical", "electrical",
+                                                "aviation and aerospace", "aerospace", "defense", "mining", "metal", "steel",
+                                                "textile", "packaging", "plastics", "paper", "engineering")),
+]
+# The industries the client works with, in the order the Industry Type filter lists them. A label that fits none is "Other".
+CLIENT_INDUSTRIES = [
+    "IT & Software Services", "Banking, Financial Services & Insurance (BFSI)", "Manufacturing & Industrial Engineering",
+    "Healthcare & Hospitals", "Pharmaceuticals & Life Sciences", "FMCG & Consumer Goods", "Retail & E-commerce",
+    "Infrastructure, Construction & Real Estate", "Logistics, Supply Chain & Transportation", "Automotive & Auto Components",
+    "Oil, Gas & Energy", "Professional Services & Consulting", "Education & EdTech", "Hospitality, Travel & Tourism",
 ]
 CATEGORIES = [name for name, _ in INDUSTRY_RULES] + [OTHER, UNKNOWN]
 
@@ -67,6 +75,9 @@ def classify_industry(label: Any) -> IndustryResult:
     clean = " ".join(str(label).split()) if label not in (None, "") else ""
     if not clean:
         return IndustryResult(UNKNOWN, None)
+    exact = next((c for c in CLIENT_INDUSTRIES if c.lower() == clean.lower()), None)
+    if exact:                                               # an industry already given in the client's own wording
+        return IndustryResult(exact, clean)
     text = f" {_norm(clean)} "
     for category, terms in INDUSTRY_RULES:
         for term in terms:

@@ -51,4 +51,5 @@ def test_list_and_details_show_the_right_tag_and_the_contacts(tmp_path):
         d = get(port, "/job/linkedin-11")[2]
         assert "Contact directly available" in d and 'href="mailto:careers@acme.example"' in d and "98765 01234" in d
         d = get(port, "/job/linkedin-12")[2]
-        assert "Contact not directly fetched" in d and "Suggested contacts" not in d and "linkedin.com/search" not in d
+        assert "Contact not directly fetched" in d and "Suggested contacts" not in d and "Suggested Recruiter</span>" not in d      # nothing is suggested without a directory entry
+        assert "This is a search shortcut, not a contact" in d                  # the only LinkedIn link is a labelled search shortcut

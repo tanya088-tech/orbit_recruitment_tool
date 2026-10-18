@@ -13,4 +13,5 @@ data_demo/
 data/*.lock
 data/*.txt
 data/backups/
+data/browser_profile/
 .env

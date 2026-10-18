@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from urllib.parse import parse_qsl
 
 from dashboard import viewmodel as vm
+from processing.industry import CLIENT_INDUSTRIES
 from tests.factories import NOW, ago, entry, make_record, standard_records
 
 ST = {}
@@ -144,7 +145,7 @@ def test_longer_posted_windows():
 def test_source_filter_lists_whatever_sources_exist():
     recs = [make_record(1), make_record(2, source="Naukri")]
     rows = rows_from(recs)
-    assert vm.filter_options(rows)["sources"] == ["LinkedIn", "Naukri"]
+    assert vm.filter_options(rows)["sources"] == ["LinkedIn", "Naukri"]            # Company Careers has its own page, not a Source choice
     assert ids(apply(rows, source="Naukri")) == ["2"] and len(apply(rows, source="")) == 2
 
 
@@ -202,8 +203,9 @@ def test_query_parsing_round_trips_and_only_five_filters_count():
     g = vm.Filters.from_query({"scope": "all", "employment": "Contract", "state": "Karnataka",
                                "work_mode": "Hybrid", "page": "2"})
     assert g.active_count == 4
-    # removed dropdowns: links that still carry them are ignored, not applied as a hidden filter
-    assert vm.Filters.from_query({"source": "Naukri", "posted": "3d"}) == vm.Filters()
+    # the removed "Job posted" dropdown is ignored in links; Source is a filter again
+    assert vm.Filters.from_query({"posted": "3d"}) == vm.Filters()
+    assert vm.Filters.from_query({"source": "Naukri"}).source == "Naukri" and vm.Filters.from_query({"source": "Naukri"}).active_count == 1
     assert vm.Filters.from_query(dict(parse_qsl(g.to_query()))) == g
     assert vm.Filters().to_query() == "" and vm.Filters().active_count == 0
 
@@ -221,9 +223,9 @@ def test_summary_cards_are_total_permanent_contract_and_follow_filters():
 
 def test_filter_options_offer_sources_found_in_the_data():
     rows = rows_from([make_record(1), make_record(2, source="Naukri"), make_record(3, source=None)])
-    assert vm.filter_options(rows) == {"sources": ["LinkedIn", "Naukri"], "states": ["Maharashtra"]}      # every supported source is selectable
+    assert vm.filter_options(rows) == {"sources": ["LinkedIn", "Naukri"], "states": ["Maharashtra"], "industries": CLIENT_INDUSTRIES}      # every supported source is selectable
     odd = rows_from([make_record(1, source="Shine")])
-    assert vm.filter_options(odd) == {"sources": ["LinkedIn", "Naukri", "Shine"], "states": ["Maharashtra"]}   # plus anything found in the data
+    assert vm.filter_options(odd) == {"sources": ["LinkedIn", "Naukri", "Shine"], "states": ["Maharashtra"], "industries": CLIENT_INDUSTRIES}   # plus anything found in the data
 
 
 # ------------------------------------------------------------------ industry on rows, missing data
@@ -231,7 +233,7 @@ def test_industry_comes_from_the_source_label_or_is_unknown():
     rows = rows_from([make_record(1, industries="Software Development"), make_record(2, industries="Hospitals and Health Care"),
                       make_record(3, industries=None), make_record(4, industries="Underwater Basket Weaving")])
     by = {r.job_id: r.industry for r in rows}
-    assert by == {"1": "IT & Software", "2": "Healthcare & Pharma", "3": "Unknown", "4": "Other"}
+    assert by == {"1": "IT & Software Services", "2": "Healthcare & Hospitals", "3": "Unknown", "4": "Other"}
     assert [r.industry_label for r in rows if r.job_id == "3"] == [None]
 
 

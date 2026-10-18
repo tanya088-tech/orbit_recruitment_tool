@@ -14,6 +14,7 @@ from models.job import Job, RunStats, SearchParams
 
 class JobSource(ABC):
     name: str = ""   # short lowercase id, e.g. "linkedin"
+    location_independent: bool = False   # True: the search ignores the keyword / city, so it is run once per collection
 
     @abstractmethod
     def search(

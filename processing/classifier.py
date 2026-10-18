@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 from config import filter_rules as R
+from config import settings
 
 
 def _compile(patterns: list[str]) -> list[re.Pattern]:
@@ -49,6 +50,70 @@ _FIELD_LABEL = {
     "description": "job description", "posted_by": "posted by",
 }
 
+
+_OVERSEAS_HQ = [(re.compile(p, re.IGNORECASE), c) for p, c in R.OVERSEAS_HQ_EMPLOYERS]
+_INDIA_HQ = _compile(R.INDIA_HQ_EMPLOYERS)
+_HQ_STATEMENTS = _compile(R.HQ_STATEMENT_PATTERNS)
+_HQ_ADJECTIVE = re.compile(R.HQ_ADJECTIVE_PATTERN, re.IGNORECASE)
+_INDIA_PLACES = {x.lower() for x in R.INDIA_CITIES} | {x.lower() for x in R.INDIA_STATES} | {"india", "bharat"}
+_FOREIGN_PLACES = ({x.lower() for x in R.FOREIGN_COUNTRIES} | {x.lower() for x in R.US_STATES} | {x.lower() for x in R.FOREIGN_PLACES}
+                   | {x.lower() for x in R.HQ_FOREIGN_CITIES})
+_ADJ_COUNTRY = {"us": "United States", "usa": "United States", "american": "United States", "uk": "United Kingdom", "british": "United Kingdom",
+                "german": "Germany", "french": "France", "swiss": "Switzerland", "dutch": "Netherlands", "japanese": "Japan",
+                "singapore": "Singapore", "singaporean": "Singapore", "canadian": "Canada", "australian": "Australia", "irish": "Ireland",
+                "swedish": "Sweden", "spanish": "Spain", "italian": "Italy", "european": "Europe", "emirati": "United Arab Emirates",
+                "korean": "South Korea", "chinese": "China"}
+
+
+def _place_country(place: str) -> Optional[str]:
+    """'India' / a foreign place name / None for the first place named in a headquarters statement ('Pune, India' -> India)."""
+    first = re.split(r",|;|\band\b|\bwith\b|\bwhile\b|\bbut\b|\bwhere\b|\bwhich\b|\bwhose\b", place, maxsplit=1)[0]
+    text = " " + re.sub(r"[^a-z ]+", " ", first.lower()) + " "
+    text = " ".join(text.split())
+    words = f" {text} "
+    for name in _INDIA_PLACES:
+        if f" {name} " in words:
+            return "India"
+    for name in sorted(_FOREIGN_PLACES, key=len, reverse=True):
+        if f" {name} " in words:
+            return name.title() if len(name) > 3 else name.upper()
+    return None
+
+
+def _headquarters(company: Optional[str], desc: str) -> tuple[Optional[str], str, str]:
+    """Where the employer's group is headquartered, from reliable evidence only: ('overseas'|'india'|None, country, evidence text).
+    1. a statement in the job description ('headquartered in New York'; 'a US-based bank')  2. the reference list of employers
+    (India-headquartered first, then overseas). The company NAME alone, a BFSI word in it, or the job title is never used."""
+    for p in _HQ_STATEMENTS:
+        for m in p.finditer(desc or ""):
+            where = _place_country(m.group("place"))
+            if where == "India":
+                return "india", "India", " ".join(m.group(0).split())[:90]
+            if where:
+                return "overseas", where, " ".join(m.group(0).split())[:90]
+    m = _HQ_ADJECTIVE.search(desc or "")
+    if m:
+        key = re.sub(r"[^a-z]", "", m.group("c").lower())
+        key = {"usa": "us"}.get(key, key)
+        return "overseas", _ADJ_COUNTRY.get(key, m.group("c").title()), " ".join(m.group(0).split())[:60]
+    name = " ".join(str(company or "").lower().split())
+    if name and _hits(_INDIA_HQ, name):
+        return "india", "India", "employer headquartered in India"
+    for pat, country in _OVERSEAS_HQ:
+        if name and pat.search(name):
+            return "overseas", country, f"known employer headquartered in {country}"
+    return None, "", ""
+
+def headquarters_of(company: Optional[str], desc: Optional[str]) -> tuple[str, str, str]:
+    """Parent-company headquarters for the dashboard filter: ('outside' | 'india' | 'unknown', country, evidence).
+    Same evidence as the classifier uses (a statement in the posting, or the reference list of known employers) - never the
+    job location, the job title or a word in the company name. 'unknown' = no reliable evidence, nothing is guessed."""
+    status, country, why = _headquarters(company, desc or "")
+    if status == "overseas":
+        return "outside", country, why
+    if status == "india":
+        return "india", "India", why
+    return "unknown", "", ""
 
 @dataclass
 class Signal:
@@ -113,6 +178,13 @@ def _unclear_company(company: Optional[str]) -> bool:
     return (not c) or c in R.UNCLEAR_COMPANY_NAMES or c.startswith("confidential")
 
 
+def employer_can_never_qualify(company: Optional[str]) -> bool:
+    """True when the employer name alone already rules a vacancy out (recruitment/staffing firm, or no real employer named).
+    Used to avoid downloading a detail page that could not change the outcome."""
+    c = " ".join(str(company or "").lower().split()).strip(" .-")
+    return bool(_hits(_STAFF_CO, company)) or _unclear_company(company) or c in R.PLACEHOLDER_COMPANY_NAMES
+
+
 def classify(
     company: Optional[str],
     title: Optional[str],
@@ -120,6 +192,7 @@ def classify(
     industries: Optional[str],
     posted_by: Optional[str] = None,
     company_url: Optional[str] = None,
+    location: Optional[str] = None,
 ) -> Classification:
     signals: list[Signal] = []
     desc = description or ""
@@ -131,15 +204,23 @@ def classify(
         def describe(group: list[Signal]) -> str:
             return "; ".join(f"{_FIELD_LABEL[s.field]} '{s.term}'" for s in group[:4])
 
+        hq = [s for s in signals if s.category == "hq"]
         if excluded:
             reason = f"Not eligible: {excluded}."
         elif bfsi or gcc:
             reason = (f"BFSI: {describe(bfsi) if bfsi else 'no evidence'}. "
-                      f"GCC: {describe(gcc) if gcc else 'no evidence'}. Rule-based eligibility - not a verified company record.")
+                      f"GCC: {describe(gcc) if gcc else 'no evidence'}. "
+                      + (f"Headquarters: {hq[0].term}. " if hq else "") + "Rule-based eligibility - not a verified company record.")
         else:
             reason = "Not eligible: no clear evidence that the employer is a GCC or a BFSI business."
         return Classification(bool(gcc and not excluded), bool(bfsi and not excluded), reason,
                               [] if excluded else signals, excluded_because=excluded)
+
+    # ---- 0. The vacancy must be located in India (the client's scope) ------------------------------
+    if location is not None and settings.REQUIRE_INDIA_LOCATION:
+        from processing.location import check_location
+        if check_location(location).country != "India":
+            return done("the vacancy is not confidently located in India")
 
     # ---- 1. Employers that can never qualify -------------------------------------------------
     if _hits(_STAFF_IND, industries):
@@ -209,6 +290,14 @@ def classify(
         signals = []
     if unclear and not ind_bfsi:
         return done("the employer is not named (confidential), so there is no employer evidence")
+    # ---- 4. Headquarters: only employers headquartered OUTSIDE India qualify --------------------------
+    if signals and settings.REQUIRE_OVERSEAS_HQ:
+        status, country, why = _headquarters(company, desc)
+        if status == "india":
+            return done(f"the employer is headquartered in India ({why})")
+        if status != "overseas":
+            return done("there is no reliable evidence that the employer is headquartered outside India")
+        signals.append(Signal("hq", "description" if "known employer" not in why else "company", f"{country} ({why})", "strong"))
     return done()
 
 

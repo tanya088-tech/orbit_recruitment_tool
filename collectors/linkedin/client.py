@@ -65,13 +65,16 @@ class HttpClient:
     # -- main entry point --------------------------------------------------
     def get(self, url: str, params: Optional[dict] = None) -> str:
         """Return page HTML or raise NotFoundError / BlockedError / FetchError."""
+        return self._send(url, lambda: self.session.get(url, params=params, timeout=self.timeout))
+
+    def _send(self, url: str, send: Callable) -> str:
         last_problem = "unknown error"
         blocked = False
 
         for attempt in range(1, self.max_retries + 1):
             self._throttle()
             try:
-                resp = self.session.get(url, params=params, timeout=self.timeout)
+                resp = send()
             except requests.RequestException as exc:
                 last_problem, blocked = f"network error: {exc}", False
                 log.warning("Attempt %d/%d failed for %s: %s", attempt, self.max_retries, url, last_problem)

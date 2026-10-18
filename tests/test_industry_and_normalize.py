@@ -5,11 +5,11 @@ from processing.normalize import clean_company, clean_location, company_key
 
 def test_industry_comes_only_from_the_source_label():
     cases = {
-        "Financial Services": "Banking & Finance", "Banking": "Banking & Finance", "Insurance": "Banking & Finance",
-        "IT Services and IT Consulting": "IT & Software", "Software Development": "IT & Software",
-        "Hospitals and Health Care": "Healthcare & Pharma", "Retail Apparel and Fashion": "Retail & E-commerce",
-        "Machinery Manufacturing": "Manufacturing & Industrial", "Business Consulting and Services": "Consulting & Professional Services",
-        "Staffing and Recruiting": "Staffing & Recruiting", "Oil and Gas": "Energy & Utilities", "Higher Education": "Education",
+        "Financial Services": "Banking, Financial Services & Insurance (BFSI)", "Banking": "Banking, Financial Services & Insurance (BFSI)", "Insurance": "Banking, Financial Services & Insurance (BFSI)",
+        "IT Services and IT Consulting": "IT & Software Services", "Software Development": "IT & Software Services",
+        "Hospitals and Health Care": "Healthcare & Hospitals", "Retail Apparel and Fashion": "Retail & E-commerce",
+        "Machinery Manufacturing": "Manufacturing & Industrial Engineering", "Business Consulting and Services": "Professional Services & Consulting",
+        "Staffing and Recruiting": "Other", "Oil and Gas": "Oil, Gas & Energy", "Higher Education": "Education & EdTech",
     }
     for label, expected in cases.items():
         got = classify_industry(label)

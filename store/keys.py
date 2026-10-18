@@ -34,6 +34,12 @@ def normalize_job_url(url: Any) -> Optional[str]:
     return f"https://{host}{parts.path.rstrip('/')}"
 
 
+def lane(source: Any) -> str:
+    """Company Careers vacancies have their own page and are a separate lane: they are only ever matched with each other.
+    Everything else (LinkedIn, Naukri, ...) is the "main" lane and is matched exactly as before."""
+    return "careers" if str(source or "").strip().lower() == "company careers" else "main"
+
+
 def _slug(text: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(text).lower()) or "unknown"
 

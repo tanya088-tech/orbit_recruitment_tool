@@ -136,8 +136,8 @@ def test_details_page_sections_and_complete_description(tmp_path):
         dd = lambda label: re.search(rf'<th scope="row">{re.escape(label)}</th><td>(.*?)</td></tr>', h, re.S).group(1)
         assert dd("Job title") == "Head of Risk" and "Acme Bank" in dd("Company name") and dd("Location") == "Pune, Maharashtra, India (Hybrid)"
         assert dd("Employment type") == "Permanent" and dd("Work mode") == "Hybrid"
-        assert "Director" in dd("Designation") and "Banking &amp; Finance" in dd("Industry") and "LinkedIn" in dd("Source")
-        assert "GCC" not in h and "BFSI" not in h
+        assert "Director" in dd("Designation") and "Banking, Financial Services &amp; Insurance (BFSI)" in dd("Industry") and "LinkedIn" in dd("Source")
+        assert "GCC" not in h and "BFSI" not in h.replace("Insurance (BFSI)", "")
         assert "Not available" in dd("Phone number")
         # every line of the description is there (escaped), including the last one: nothing is cut off
         assert "Responsibility number 1:" in h and "Responsibility number 200:" in h and "The very last line." in h

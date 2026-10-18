@@ -134,6 +134,30 @@ def _criteria(soup: BeautifulSoup) -> dict[str, str]:
     return out
 
 
+_POSTER_CLASS = ("hirer", "poster", "hiring-team", "hiring_team", "recruiter")
+_PROFILE_RE = re.compile(r"^https?://(?:[a-z]{2,3}\.|www\.)?linkedin\.com/in/[A-Za-z0-9%_\-]{2,100}", re.I)
+
+
+def _poster(soup: BeautifulSoup) -> Optional[dict[str, Optional[str]]]:
+    """The person the posting page itself shows as the poster / hiring team, when that block is in the public page we already
+    downloaded. Reads nothing else, never follows the link, and returns None when the page shows no such block (the usual case
+    for the logged-out view)."""
+    for a in soup.select('a[href*="linkedin.com/in/"]'):
+        m = _PROFILE_RE.match((a.get("href") or "").strip())
+        card = a.find_parent(lambda t: getattr(t, "name", None) in ("div", "section", "li", "aside")
+                             and any(w in " ".join(t.get("class") or []).lower() for w in _POSTER_CLASS))
+        if not (m and card):
+            continue
+        pick = lambda words: next((n.get_text(" ", strip=True) for n in card.find_all(True, class_=lambda c: c and any(w in str(c).lower() for w in words))
+                                   if n.get_text(" ", strip=True)), None)
+        name = pick(("name",)) or a.get_text(" ", strip=True) or None
+        designation = pick(("headline", "subtitle", "job-title", "position"))
+        if designation == name:
+            designation = None
+        return {"name": name, "designation": designation, "profile_url": m.group(0).split("?")[0].rstrip("/")}
+    return None
+
+
 def parse_job_detail(html: str) -> dict[str, Any]:
     """Return normalized detail fields. Raises ParseError if nothing usable found."""
     soup = BeautifulSoup(html, "lxml")
@@ -175,6 +199,6 @@ def parse_job_detail(html: str) -> dict[str, Any]:
         "posted_date": posted,
         "posted_age_text": age_text,
         "posted_timestamp": posted_dt.isoformat(timespec="seconds") if posted_dt else None,
-        "raw": {"json_ld": ld or None, "criteria": criteria or None,
+        "raw": {"poster": _poster(soup), "json_ld": ld or None, "criteria": criteria or None,
                 "experience_requirements": _ld_experience(ld), "education_requirements": _ld_education(ld)},
     }

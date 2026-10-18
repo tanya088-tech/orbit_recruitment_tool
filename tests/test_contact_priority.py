@@ -214,5 +214,30 @@ def test_the_default_list_shows_postings_with_poster_contacts_first_within_a_rec
             make_record(2, "Has contact same window", "Acme Bank", description=CALL, posted=iso(6, 10), precision="exact"),
             make_record(3, "Has contact older window", "Acme Bank", description=CALL, posted=iso(3), precision="exact"),
             make_record(4, "No contact older window", "Acme Bank", description=NONE, posted=iso(3, 30), precision="exact")]
-    got = [r.title for r in vm.sort_rows(rows_from(recs), "recent")]
+    with pool(factor=1, tol=1):
+        got = [r.title for r in vm.sort_rows(rows_from(recs), "recent")]
     assert got == ["Has contact same window", "No contact newest", "Has contact older window", "No contact older window"]
+
+
+def test_the_list_shows_the_recruiter_contact_stated_in_the_posting_and_nothing_else():
+    from dashboard import views
+    from tests.test_viewmodel import rows_from
+    rows = rows_from([make_record(1, "With contact", description="Contact Priya Shah, email priya@acme.example or call 9876501234."),
+                      make_record(2, "No contact", description="Apply on the website.")])
+    by = {r.title: views._contact_cell(r) for r in rows}
+    assert "mailto:priya@acme.example" in by["With contact"] and "9876501234" in by["With contact"]
+    assert "Not stated in the posting" in by["No contact"] and "@" not in by["No contact"]
+
+
+def test_the_posted_column_shows_the_posting_date_and_contact_vacancies_lead_within_a_day():
+    from dashboard import views
+    from dashboard import viewmodel as vm
+    from tests.factories import NOW, ago
+    from tests.test_viewmodel import rows_from
+    rows = rows_from([make_record(1, "Newest no contact", description="Apply online.", posted=ago(hours=1)),
+                      make_record(2, "Older with contact", description="Email hr@acme.example", posted=ago(hours=10)),
+                      make_record(3, "Day old with contact", description="Call 9876501234", posted=ago(hours=40))])
+    titles = [r.title for r in vm.sort_rows(rows, "recent")]
+    assert titles == ["Older with contact", "Newest no contact", "Day old with contact"]
+    html = views._row_html(rows[0], vm.Filters(), NOW, "/")
+    assert vm.format_posted_on(rows[0].posted) in html and "IST" in html

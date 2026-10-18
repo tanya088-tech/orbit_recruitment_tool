@@ -232,6 +232,8 @@ def test_the_strict_view_filter_is_on_by_default_in_production_settings():
         settings.DISPLAY_ONLY_GCC_BFSI = False        # tests keep the fixture-friendly default
         settings.COLLECTION_CANDIDATE_POOL_FACTOR = 1   # the reload above restored the production value
         settings.COLLECTION_STRICT_WINDOW = False
+        settings.REQUIRE_OVERSEAS_HQ = False
+        settings.REQUIRE_INDIA_LOCATION = False
 
 
 # -- tightened rules: a name is never enough (the "Electrical GCC" case) ------------------------------------------------
