@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import replace
 from typing import Any, Iterator, Optional
 
 from collectors.browser_source import BrowserListSource
+from config import settings
 from collectors.naukri.detail_parser import DESCRIPTION_SELECTOR, EXPAND_SELECTORS, parse_job_detail
 from collectors.naukri.search_parser import parse_search_results
 from models.job import Job, RunStats, SearchParams
+from processing.classifier import is_known_overseas_employer
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +32,19 @@ def keyword_terms(keywords: str) -> list[str]:
     """'bank OR fintech' -> ['bank', 'fintech'] (Naukri takes the alternatives comma-separated)."""
     parts = [p.strip().strip('"') for p in re.split(r"\s+OR\s+|,", keywords, flags=re.I) if p.strip()]
     return parts or [keywords.strip()]
+
+
+def naukri_location(text: Optional[str]) -> Optional[str]:
+    """Naukri is an Indian job site and writes Indian places without the country, often small towns the place lists do not
+    know ("Kotputli, Bhiwadi", "Sonipat( Kundli )"). When the text names no foreign country or place and no known Indian one,
+    ", India" is added so the vacancy is not dropped as 'not located in India'. Text that names a foreign country or place
+    ("Saudi Arabia", "Doha, Gulf") or is already recognised is returned unchanged."""
+    from processing.location import check_location
+    if not text or not text.strip():
+        return text
+    if check_location(text).country is None:
+        return f"{text.strip()}, India"
+    return text
 
 
 def search_url(params: SearchParams, page: int) -> str:
@@ -56,6 +72,16 @@ class NaukriSource(BrowserListSource):
     def search_url(self, params: SearchParams, page: int) -> str:
         return search_url(params, page)
 
+    def card_skip_reason(self, stub: dict[str, Any], params: SearchParams) -> Optional[str]:
+        """A search for an employer's name (e.g. "Barclays") also lists other companies' jobs, mostly when the employer has
+        posted little in the chosen period (in the last 24 hours, 'Barclays' gave two cards, both from a staffing firm).
+        For such a search only cards from an employer on the reference lists are opened. Role-term searches are unaffected."""
+        if not is_known_overseas_employer(params.keywords):
+            return None
+        if is_known_overseas_employer(stub.get("company")):
+            return None
+        return f"is not one of the listed employers (searched for '{params.keywords}')"
+
     def search(self, params: SearchParams, stats: RunStats, skip_ids: Optional[set[str]] = None) -> Iterator[Job]:
         """One search per keyword ("GCC OR bank OR financial services" = three searches), results merged newest-first-ish
         (round robin over the keywords, since each is newest first), a vacancy found by several keywords counted once.
@@ -67,11 +93,19 @@ class NaukriSource(BrowserListSource):
         known = set(skip_ids) if skip_ids is not None else set()
         per_term: list[tuple[list[Job], list[str]]] = []
         stop: Optional[Exception] = None
+        # With a cap of N, the merged list takes about N / keywords from each keyword (round robin below), so opening N
+        # postings for EVERY keyword mostly fetched pages that were then left out. Each keyword now gets its share
+        # (x NAUKRI_KEYWORD_SHARE_FACTOR, so a keyword with few results is made up by the others).
+        share = params.max_jobs
+        factor = float(settings.NAUKRI_KEYWORD_SHARE_FACTOR or 0)
+        if params.max_jobs and factor > 0:
+            share = min(params.max_jobs, max(1, math.ceil(params.max_jobs * factor / len(terms))))
+        pages = min(params.max_pages, int(settings.NAUKRI_MAX_PAGES_PER_KEYWORD or params.max_pages))
         for term in terms:
             sub = RunStats()
             jobs: list[Job] = []
             try:
-                for job in super().search(replace(params, keywords=term), sub, set(known)):
+                for job in super().search(replace(params, keywords=term, max_jobs=share, max_pages=pages), sub, set(known)):
                     jobs.append(job)
                     if job.job_id:
                         known.add(str(job.job_id))
@@ -112,7 +146,7 @@ class NaukriSource(BrowserListSource):
         return Job(
             source="Naukri", job_id=stub["job_id"],
             title=detail["title"] or stub["title"], company=detail["company"] or stub["company"],
-            location=detail["location"] or stub["location"], job_url=stub["job_url"],
+            location=naukri_location(detail["location"] or stub["location"]), job_url=stub["job_url"],
             description=detail["description"], employment_type=detail["employment_type"],
             posted_date=detail["posted_date"] or stub["posted_date"], posted_age_text=age_text,
             posted_timestamp=detail["posted_timestamp"], company_url=stub.get("company_url"),

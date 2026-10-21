@@ -102,18 +102,20 @@ def test_skip_option_can_be_switched_off(tmp_path):
     finally:
         settings.COLLECTION_SKIP_KNOWN_IDS = original
     assert "--skip-ids-file" not in build_command("india", Path("/tmp/o"))
-    assert build_command("india", Path("/tmp/o"), ["Pune, India"], Path("/tmp/k.txt"))[-2:] == ["--skip-ids-file", "/tmp/k.txt"]
+    assert build_command("india", Path("/tmp/o"), ["Pune, India"], Path("/tmp/k.txt"))[-2:] == ["--skip-ids-file", str(Path("/tmp/k.txt"))]
 
 
 # ------------------------------------------------------------------ pagination
-def test_default_pagination_is_unchanged_start_equals_page_times_25():
-    assert settings.LINKEDIN_PAGINATION == "fixed"
+def test_default_pagination_follows_the_listings_each_page_returned():
+    assert settings.LINKEDIN_PAGINATION == "returned"
     fake = PagedFake(total=100, per_page=10)
     collect(fake, max_pages=4)
-    assert fake.search_starts == [0, 25, 50, 75]
+    assert fake.search_starts == [0, 10, 20, 30]
 
 
 def test_when_a_page_returns_10_the_fixed_step_skips_listings_and_returned_mode_does_not():
+    original = settings.LINKEDIN_PAGINATION
+    settings.LINKEDIN_PAGINATION = "fixed"
     fixed = PagedFake(total=100, per_page=10)
     got_fixed = {j.job_id for j in collect(fixed, max_pages=4).jobs}
     assert len(got_fixed) == 40 and fixed.search_starts == [0, 25, 50, 75]    # 40 collected, but they cover offsets 0-9, 25-34 ...
@@ -125,10 +127,11 @@ def test_when_a_page_returns_10_the_fixed_step_skips_listings_and_returned_mode_
         assert got == {str(4000000000 + i) for i in range(1, 41)}              # the first 40 listings, none skipped
         assert got != got_fixed
     finally:
-        settings.LINKEDIN_PAGINATION = "fixed"
+        settings.LINKEDIN_PAGINATION = original
 
 
 def test_returned_mode_follows_25_per_page_and_stops_at_the_end_or_when_stuck():
+    original = settings.LINKEDIN_PAGINATION
     settings.LINKEDIN_PAGINATION = "returned"
     try:
         big = PagedFake(total=60, per_page=25)
@@ -144,7 +147,7 @@ def test_returned_mode_follows_25_per_page_and_stops_at_the_end_or_when_stuck():
         stuck = Stuck()
         assert len(collect(stuck, max_pages=40).jobs) == 5 and len(stuck.search_starts) == 2   # stops instead of looping 40 times
     finally:
-        settings.LINKEDIN_PAGINATION = "fixed"
+        settings.LINKEDIN_PAGINATION = original
 
 
 def test_verify_pagination_script_exists_and_makes_only_three_requests():

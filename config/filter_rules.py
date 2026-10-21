@@ -144,7 +144,7 @@ KNOWN_BFSI_EMPLOYERS = [
     r"\bhdfc\b", r"\bicici\b", r"\bkotak\b", r"\bsbi\b", r"\bidfc\b", r"\bjp ?morgan\b", r"\bgoldman sachs\b",
     r"\bmorgan stanley\b", r"\bciti(group|bank)?\b", r"\bhsbc\b", r"\bbarclays\b", r"\bstandard chartered\b",
     r"\bwells fargo\b", r"\bamerican express\b", r"\bmastercard\b", r"\bpaypal\b", r"\bbnp paribas\b",
-    r"\bubs\b", r"\bcredit suisse\b", r"\bstate street\b", r"\bblackrock\b", r"\bnatwest\b", r"\bnomura\b",
+    r"\bubs\b", r"\bcredit suisse\b", r"\bstate street\b", r"\bblackrock\b", r"\bnatwest\b", r"^nomura\b",
     r"\bbajaj (finance|finserv|allianz)\b", r"\bmax life\b", r"\blic of india\b", r"\ballianz\b", r"\baxa\b",
 ]
 # LinkedIn company-page address (/company/<slug>) containing a BFSI word. Counts as employer evidence only together with BFSI
@@ -254,6 +254,9 @@ FOREIGN_COUNTRIES = {
 FOREIGN_PLACES = {   # foreign regions / cities that share names with Indian ones
     "sindh", "karachi", "lahore", "islamabad", "dhaka", "colombo", "kathmandu",
     "khyber pakhtunkhwa", "balochistan",
+    # Gulf cities often written on Naukri without their country ("Riyadh", "Doha, Gulf")
+    "riyadh", "jeddah", "dammam", "al khobar", "doha", "muscat", "abu dhabi", "sharjah", "ajman", "kuwait city", "manama",
+    "gulf", "middle east",
 }
 US_STATES = {
     "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut",
@@ -297,7 +300,7 @@ OVERSEAS_HQ_EMPLOYERS = [
     (r"\bing (bank|groep|group)\b", "Netherlands"), (r"\babn amro\b", "Netherlands"), (r"\brabobank\b", "Netherlands"),
     (r"\bsantander\b", "Spain"), (r"\bbbva\b", "Spain"),
     (r"\bdbs\b", "Singapore"), (r"\bocbc\b", "Singapore"), (r"\buob\b", "Singapore"),
-    (r"\bmizuho\b", "Japan"), (r"\bmufg\b|\bmitsubishi ufj\b", "Japan"), (r"\bsmbc\b|\bsumitomo mitsui\b", "Japan"), (r"\bnomura\b", "Japan"),
+    (r"\bmizuho\b", "Japan"), (r"\bmufg\b|\bmitsubishi ufj\b", "Japan"), (r"\bsmbc\b|\bsumitomo mitsui\b", "Japan"), (r"^nomura\b", "Japan"),
     (r"\banz\b", "Australia"), (r"\bcommonwealth bank\b", "Australia"), (r"\bmacquarie\b", "Australia"),
     (r"\bnational australia bank\b|\bnab\b", "Australia"), (r"\bwestpac\b", "Australia"),
     (r"\bcibc\b", "Canada"), (r"\broyal bank of canada\b|\brbc\b", "Canada"), (r"\bscotiabank\b", "Canada"),
@@ -317,6 +320,123 @@ OVERSEAS_HQ_EMPLOYERS = [
     (r"\bgsk\b|\bglaxosmithkline\b", "United Kingdom"), (r"\bastrazeneca\b", "United Kingdom"), (r"\bunilever\b", "United Kingdom"),
     (r"\bshell\b", "United Kingdom"), (r"\bbp\b", "United Kingdom"), (r"\bairbus\b", "France"),
 ]
+# --------------------------------------------------------------------------------------
+# KNOWN GCC EMPLOYERS: multinational groups that run a Global Capability Centre (captive tech / operations / shared-services
+# centre) in India: (name pattern, group headquarters country). A vacancy in India at one of these employers is tagged GCC
+# from the company name alone, so postings that never say "GCC" are no longer missed. The country also counts as the
+# headquarters evidence for REQUIRE_OVERSEAS_HQ. Patterns are matched against the company name (case-insensitive). Edit freely.
+# --------------------------------------------------------------------------------------
+KNOWN_GCC_EMPLOYERS = [
+    # banks, insurers, asset managers, payments, market infrastructure
+    (r"\bjp ?morgan", "United States"), (r"\bwells fargo\b", "United States"), (r"\bciti(group|bank|corp)?\b", "United States"),
+    (r"\bbank of america\b", "United States"), (r"\bgoldman sachs\b", "United States"), (r"\bmorgan stanley\b", "United States"),
+    (r"\bu\.?s\.? bank\b|\bu\.?s\.? bancorp\b", "United States"), (r"\bbny\b|\bbank of new york\b", "United States"),
+    (r"\bstate street\b", "United States"), (r"\bnorthern trust\b", "United States"), (r"\bsynchrony\b", "United States"),
+    (r"\bamerican express\b|\bamex\b", "United States"), (r"\bmastercard\b", "United States"), (r"^visa( inc\.?)?$", "United States"),
+    (r"\bpaypal\b", "United States"), (r"\bvanguard\b", "United States"), (r"\bblackrock\b", "United States"),
+    (r"\bfidelity (investments|international)\b|\bfmr\b", "United States"), (r"\bfiserv\b", "United States"),
+    (r"\bfis global\b|\bfidelity national information\b", "United States"), (r"\bbroadridge\b", "United States"),
+    (r"\bmetlife\b", "United States"), (r"\baig\b", "United States"), (r"\bprudential financial\b|\bpgim\b", "United States"),
+    (r"\bprincipal (financial|global)\b", "United States"), (r"\bnasdaq\b", "United States"), (r"\bs&p global\b", "United States"),
+    (r"\bmoody'?s\b", "United States"), (r"\bmsci\b", "United States"), (r"\bmorningstar\b", "United States"),
+    (r"\bdtcc\b", "United States"), (r"\bintercontinental exchange\b|\bice data\b", "United States"),
+    (r"\bocwen\b|\bonity\b", "United States"), (r"\bfreddie mac\b|\bfannie mae\b", "United States"),
+    (r"\bhsbc\b", "United Kingdom"), (r"\bbarclays\b", "United Kingdom"), (r"\bstandard chartered\b", "United Kingdom"),
+    (r"\bnatwest\b|\broyal bank of scotland\b", "United Kingdom"), (r"\blloyds (banking|bank|technology)\b", "United Kingdom"),
+    (r"\blondon stock exchange\b|\blseg\b", "United Kingdom"), (r"\bschroders\b", "United Kingdom"), (r"\bphoenix group\b", "United Kingdom"),
+    (r"\bdeutsche bank\b", "Germany"), (r"\ballianz\b", "Germany"), (r"\bcommerzbank\b", "Germany"), (r"\bmunich re\b", "Germany"),
+    (r"\bbnp paribas\b", "France"), (r"\bsoci[eé]t[eé] g[eé]n[eé]rale\b|\bsocgen\b", "France"), (r"\baxa\b", "France"),
+    (r"\bcr[eé]dit agricole\b|\bcacib\b", "France"), (r"\bnatixis\b", "France"),
+    (r"\bubs\b", "Switzerland"), (r"\bchubb\b", "Switzerland"), (r"\bzurich insurance\b", "Switzerland"), (r"\bswiss re\b", "Switzerland"),
+    (r"\bjulius b[aä]r\b", "Switzerland"),
+    (r"\bing (bank|groep|group|hubs?|tech)\b", "Netherlands"), (r"\babn amro\b", "Netherlands"), (r"\brabobank\b", "Netherlands"),
+    (r"\bdbs\b", "Singapore"), (r"\bocbc\b", "Singapore"), (r"\buob\b", "Singapore"),
+    (r"\bmufg\b|\bmitsubishi ufj\b", "Japan"), (r"\bmizuho\b", "Japan"), (r"^nomura\b", "Japan"), (r"\bsmbc\b|\bsumitomo mitsui\b", "Japan"),
+    (r"\banz\b", "Australia"), (r"\bmacquarie\b", "Australia"), (r"\bwestpac\b", "Australia"), (r"\bcommonwealth bank\b", "Australia"),
+    (r"\bmanulife\b|\bjohn hancock\b", "Canada"), (r"\bsun life\b", "Canada"), (r"\bcibc\b", "Canada"), (r"\bscotiabank\b", "Canada"),
+    (r"\broyal bank of canada\b", "Canada"), (r"\btd bank\b|\btoronto[- ]dominion\b", "Canada"),
+    (r"\bemirates nbd\b", "United Arab Emirates"), (r"\bmashreq\b", "United Arab Emirates"),
+    # Big Four and professional-services captives (named by their India delivery arm only, not their Indian client practices)
+    (r"\bey gds\b|\bey global delivery\b", "United Kingdom"), (r"\bdeloitte (usi|us india|global)\b", "United States"),
+    (r"\bkpmg global services\b|\bkpmg (resource|delivery) cent", "Netherlands"), (r"\bpwc (acceleration|service delivery)\b", "United Kingdom"),
+    (r"\bgartner\b", "United States"), (r"\bmckinsey\b", "United States"), (r"\bboston consulting\b|\bbcg\b", "United States"),
+    (r"\bbain & company\b|\bbain capability\b", "United States"),
+    # technology and product companies
+    (r"\bmicrosoft\b", "United States"), (r"\bgoogle\b|\balphabet\b", "United States"), (r"^apple( inc\.?)?$", "United States"),
+    (r"\bcisco\b", "United States"), (r"\bintel\b", "United States"), (r"\bqualcomm\b", "United States"),
+    (r"\btexas instruments\b", "United States"), (r"\bnvidia\b", "United States"), (r"\bamd\b|\badvanced micro devices\b", "United States"),
+    (r"\bdell\b", "United States"), (r"\bhp inc\b|\bhewlett", "United States"), (r"\boracle\b", "United States"),
+    (r"\badobe\b", "United States"), (r"\bsalesforce\b", "United States"), (r"\bservicenow\b", "United States"),
+    (r"\bvmware\b|\bbroadcom\b", "United States"), (r"\bintuit\b", "United States"), (r"\bautodesk\b", "United States"),
+    (r"\bworkday\b", "United States"), (r"\bmicron\b", "United States"), (r"\banalog devices\b", "United States"),
+    (r"\bnetapp\b", "United States"), (r"\bpalo alto networks\b", "United States"), (r"\buber\b", "United States"),
+    (r"\blinkedin\b", "United States"), (r"\bsap\b", "Germany"), (r"\bsiemens\b", "Germany"), (r"\bbosch\b", "Germany"),
+    (r"\binfineon\b", "Germany"), (r"\bnxp\b", "Netherlands"), (r"\bericsson\b", "Sweden"), (r"\bnokia\b", "Finland"),
+    (r"\bthomson reuters\b", "Canada"), (r"\bwolters kluwer\b", "Netherlands"), (r"\brelx\b|\belsevier\b|\blexisnexis\b", "United Kingdom"),
+]
+# Groups that ALSO run an ordinary Indian business (factories, shops, field sales, hospitals...). Their name counts as GCC
+# evidence only when the job title is capability-centre work (GCC_CAPABILITY_TITLE_PATTERNS below): "Siemens - Software
+# Engineer" is GCC, "Siemens - Plant Manager" is not. Same (name pattern, headquarters country) format.
+KNOWN_GCC_MIXED_EMPLOYERS = [
+    # retail, consumer, industrial, automotive, energy, healthcare
+    (r"\bwalmart\b", "United States"), (r"^target$|\btarget (corporation|in india|india)\b", "United States"),
+    (r"\blowe'?s\b", "United States"), (r"\bhome depot\b", "United States"), (r"\bbest buy\b", "United States"),
+    (r"\bnike\b", "United States"), (r"\bkroger\b", "United States"), (r"\bcostco\b", "United States"), (r"\bmcdonald'?s global\b", "United States"),
+    (r"\bprocter & gamble\b|\bp&g\b", "United States"), (r"\bpepsico\b", "United States"), (r"\bcoca[- ]cola\b", "United States"),
+    (r"\bmondelez\b", "United States"), (r"\bkellogg\b|\bkellanova\b", "United States"), (r"^mars( inc\.?| incorporated)?$", "United States"),
+    (r"\bgeneral electric\b|\bge (aerospace|vernova|healthcare)\b", "United States"), (r"\bhoneywell\b", "United States"),
+    (r"\bcaterpillar\b", "United States"), (r"\bjohn deere\b|\bdeere\b", "United States"), (r"\bboeing\b", "United States"),
+    (r"\bford motor\b|^ford$", "United States"), (r"\bgeneral motors\b", "United States"), (r"\bcummins\b", "United States"),
+    (r"\beaton\b", "Ireland"), (r"\bemerson\b", "United States"), (r"\b3m\b", "United States"), (r"^carrier$|\bcarrier (global|corporation|technologies)\b", "United States"),
+    (r"^otis$|\botis (elevator|worldwide)\b", "United States"), (r"\bjohnson controls\b", "Ireland"), (r"\brtx\b|\braytheon\b|\bpratt & whitney\b|\bcollins aerospace\b", "United States"),
+    (r"\bmercedes[- ]benz\b", "Germany"), (r"\bbmw\b", "Germany"), (r"\bvolkswagen\b", "Germany"),
+    (r"\bzf\b", "Germany"), (r"\bschaeffler\b", "Germany"), (r"\bbasf\b", "Germany"), (r"\bbayer\b", "Germany"),
+    (r"\bvolvo\b", "Sweden"), (r"\babb\b", "Switzerland"), (r"\bschneider electric\b", "France"), (r"\bairbus\b", "France"),
+    (r"\bsafran\b", "France"), (r"\bphilips\b", "Netherlands"), (r"^shell$|\bshell (india|business|technology)\b", "United Kingdom"), (r"^bp$|\bbp (india|business solutions)\b", "United Kingdom"),
+    (r"\bexxon\b", "United States"), (r"\bchevron\b", "United States"), (r"\bunilever\b", "United Kingdom"),
+    (r"\bnestl[eé]\b", "Switzerland"), (r"\bmaersk\b", "Denmark"), (r"\bdhl\b", "Germany"), (r"\bfedex\b", "United States"),
+    (r"^ups$|\bups (india|supply chain|global)\b", "United States"), (r"\bpfizer\b", "United States"), (r"\bjohnson & johnson\b|\bj&j\b", "United States"),
+    (r"\bmerck\b|\bmsd\b", "United States"), (r"\babbott\b", "United States"), (r"\beli lilly\b", "United States"),
+    (r"\bamgen\b", "United States"), (r"\bmedtronic\b", "Ireland"), (r"\boptum\b|\bunitedhealth\b", "United States"),
+    (r"\bcigna\b|\bevernorth\b", "United States"), (r"\belevance\b|\bcarelon\b", "United States"), (r"\bcvs health\b", "United States"),
+    (r"\bnovartis\b", "Switzerland"), (r"\broche\b", "Switzerland"), (r"\bastrazeneca\b", "United Kingdom"),
+    (r"\bgsk\b|\bglaxosmithkline\b", "United Kingdom"), (r"\bsanofi\b", "France"), (r"\bnovo nordisk\b", "Denmark"),
+]
+# Capability-centre work: technology, data, engineering design, finance / HR / procurement operations, analytics, risk.
+GCC_CAPABILITY_TITLE_PATTERNS = [
+    r"\bsoftware\b", r"\bdevelop(er|ment)\b", r"\bprogrammer\b", r"\bdata\b", r"\banalytics?\b", r"\banalyst\b",
+    r"\barchitect\b", r"\bcloud\b", r"\bdevops\b", r"\bsre\b", r"\bcyber\b", r"\b(information )?security\b", r"\bit\b",
+    r"\btechnology\b", r"\btech\b", r"\bdigital\b", r"\bmachine learning\b", r"\bai\b", r"\bml\b", r"\bscientist\b",
+    r"\bproduct (manager|owner|management)\b", r"\bscrum\b", r"\bqa\b", r"\btest(ing)?\b", r"\bsap\b", r"\berp\b",
+    r"\b(design|software|systems|embedded|firmware|r&d|simulation|cad|cae|validation) engineer", r"\bengineering (lead|manager)\b",
+    r"\bfinance\b", r"\baccount(ing|ant|s payable|s receivable)\b", r"\bpayroll\b", r"\bprocurement\b", r"\bsourcing\b",
+    r"\bsupply chain (analyst|planner|planning)\b", r"\brisk\b", r"\bcompliance\b", r"\baudit\b", r"\bcontroller\b", r"\bfp&a\b",
+    r"\btax\b", r"\bhr (operations|services|shared)\b", r"\bshared services\b", r"\bglobal\b", r"\bresearch\b",
+]
+# Roles that are part of a group's ordinary Indian business (branches, retail banking, field sales, stores), not its capability
+# centre. For these titles the company name alone does NOT make the vacancy a GCC one (it can still be BFSI).
+GCC_NAME_NOT_FOR_TITLE_PATTERNS = [
+    r"\bbranch\b", r"\bteller\b", r"\bcashier\b", r"\bpersonal banker\b", r"\bconsumer banking\b", r"\bretail banking\b", r"\bcasa\b",
+    r"\b(premier|platinum|priority|imperia|wealth|branch|privilege) relationship manager\b", r"\bsales (officer|executive)\b",
+    r"\bfield sales\b", r"\bterritory\b", r"\bmedical (representative|rep)\b", r"\barea (sales )?manager\b", r"\bstore\b",
+    r"\bwarehouse\b", r"\bdelivery (associate|executive|boy)\b", r"\bfront desk\b", r"\bplant\b", r"\bproduction\b",
+    r"\bshop ?floor\b", r"\btechnician\b", r"\boperator\b",
+]
+
+# --------------------------------------------------------------------------------------
+# CARD TITLES NOT WORTH OPENING: job titles on a Naukri search card that are clearly not GCC / BFSI work (tele-calling, BPO voice,
+# property sales, delivery, hospitality ...). The detail page is not opened, which is what makes Naukri slow. Kept deliberately
+# narrow: a card from a known GCC / overseas-headquartered employer (KNOWN_GCC_EMPLOYERS, OVERSEAS_HQ_EMPLOYERS ...) is always
+# opened whatever its title, and banking / insurance / finance words never appear here. Edit with care.
+# --------------------------------------------------------------------------------------
+CARD_TITLE_SKIP_PATTERNS = [
+    r"\btele ?-?call(er|ing)\b", r"\btele ?-?sales\b", r"\b(international |domestic )?voice process\b", r"\bbpo\b",
+    r"\bcall cent(er|re)\b", r"\b(property|real estate|realty) (advisor|adviser|consultant|sales|executive|manager)\b",
+    r"\breal estate\b", r"\bdelivery (boy|executive|partner|associate|rider)\b", r"\bdriver\b", r"\bsecurity guard\b",
+    r"\bhousekeeping\b", r"\b(chef|cook|waiter|steward|bartender)\b", r"\brestaurant\b", r"\bhotel\b", r"\bbeautician\b",
+    r"\bsalon\b", r"\bnurse\b|\bnursing\b", r"\bpharmacist\b", r"\b(school|primary|pre-?primary) teacher\b",
+]
+
 # Employers headquartered in India. They never qualify unless the posting itself names an overseas headquarters.
 INDIA_HQ_EMPLOYERS = [
     r"\bhdfc\b", r"\bicici\b", r"\bkotak\b", r"\bsbi\b", r"\bstate bank of india\b", r"\bidfc\b", r"\baxis bank\b", r"\byes bank\b",

@@ -194,6 +194,10 @@ h3.section.small { font-size: 16px; }
 .collect-run select { height: 36px; padding: 0 10px; font: inherit; border: 1px solid #bfc4d4; border-radius: 5px; background: #fff; }
 .collect-row { display: flex; gap: 10px; }
 .collect-row form { margin: 0; }
+.collect-stop { margin: 0; }
+.collect-stop .btn { width: 100%; }
+.btn-danger { background: #b3261e; border-color: #b3261e; color: #fff; }
+.btn-danger:hover { background: #8c1d17; }
 .btn[disabled], select[disabled] { opacity: .55; cursor: not-allowed; }
 .collect-log { margin-top: 8px; font-size: 13px; }
 .collect-log pre { background: #f4f5f9; padding: 8px; border-radius: 5px; overflow-x: auto; max-height: 200px; white-space: pre-wrap; }

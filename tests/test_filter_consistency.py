@@ -162,13 +162,13 @@ def test_the_source_dropdown_is_on_the_dashboard_filters_and_posted_is_not(tmp_p
 
 # ---- the collection form (the "International shows India" case) ----------------------------------------------
 def test_collection_form_always_opens_with_the_defaults(tmp_path):
-    """LinkedIn + Naukri ticked, India, last 24 hours - on first open and again after any earlier run."""
+    """LinkedIn selected (one source per run), India, last 24 hours - on first open and again after any earlier run."""
     app, mgr = make_app(tmp_path)
     srv = serve(app); port = srv.server_address[1]
 
     def check(h):
         assert '<option value="india" selected>' in h and '<option value="24h" selected>' in h
-        assert re.search(r'name="source" value="LinkedIn" checked', h) and re.search(r'name="source" value="Naukri" checked', h)
+        assert '<option value="LinkedIn" selected>' in h and '<option value="Naukri">' in h
     try:
         check(get(port, "/")[2])
         call(port, "POST", "/collection/run", {"scope": "international", "count": "75", "window": "7d", "sources_sent": "1", "source": "LinkedIn"})

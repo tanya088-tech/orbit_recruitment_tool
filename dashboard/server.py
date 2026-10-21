@@ -9,6 +9,7 @@ Routes
   POST /job/<key>/notes/<id>/delete   delete a note
   POST /collection/saved              show the saved vacancies that match the form (no search)
   POST /collection/run                start a background job collection (fields: scope, count)
+  POST /collection/stop               stop the running collection (what was found so far is kept)
   GET  /collection/status             collection status as JSON
   POST /app/restart                   restart the dashboard process (refused while collecting)
   GET  /static/<file>                 stylesheet / script / Groxa AI logo (if downloaded)
@@ -275,6 +276,10 @@ def make_handler(app: DashboardApp):
                 return self._collection_run()
             if path == "/collection/saved":
                 return self._collection_run(saved=True)
+            if path == "/collection/stop":
+                if app.collection is None:
+                    return self._redirect("/?notice=disabled")
+                return self._redirect("/?notice=stopping" if app.collection.stop() else "/?notice=not_running")
             if path == "/app/restart":
                 return self._restart()
             note_del = _NOTE_DELETE.match(path)

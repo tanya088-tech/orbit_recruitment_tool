@@ -42,13 +42,43 @@ def _fetch_logo_in_background() -> None:
     threading.Thread(target=work, name="orbit-logo", daemon=True).start()
 
 
+_PARENT_PID_ENV = "ORBIT_DASHBOARD_PARENT_PID"
+
+
 def _restart_process() -> None:
-    """Start this same command again in place (without --open, the browser tab is already open). Called from the main
-    thread after the web server has been shut down and its port released, so the new process can bind straight away."""
+    """Start this same command again (without --open, the browser tab is already open). Called from the main thread after
+    the web server has been shut down and its port released, so the new process can bind straight away.
+
+    Mac / Linux: the process is replaced in place (os.execv), so the Terminal window and the process id stay the same.
+    Windows: os.execv is not a real in-place replacement there and splits arguments that contain spaces (such as the
+    "Ai Job Reader" folder), so the new dashboard is started as a child process and this one waits for it, keeping the
+    console window attached. The child stops by itself if this process is ended (see _exit_when_parent_dies)."""
     args = [a for a in sys.argv if a != "--open"]
     sys.stdout.flush()
     sys.stderr.flush()
-    os.execv(sys.executable, [sys.executable] + args)
+    if os.name != "nt":
+        os.execv(sys.executable, [sys.executable] + args)
+    import subprocess
+    env = dict(os.environ, **{_PARENT_PID_ENV: str(os.getpid())})
+    raise SystemExit(subprocess.call([sys.executable] + args, env=env))
+
+
+def _exit_when_parent_dies() -> None:
+    """Windows only: a dashboard started by a restart ends when the process that started it ends (closed window, Task
+    Manager, a test stopping it), so no orphaned dashboard keeps the port busy."""
+    pid = os.environ.get(_PARENT_PID_ENV)
+    if os.name != "nt" or not (pid or "").isdigit():
+        return
+    import ctypes
+
+    def watch() -> None:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x00100000, False, int(pid))      # SYNCHRONIZE
+        if not handle:
+            return
+        kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)               # INFINITE: returns when the parent has ended
+        os._exit(0)
+    threading.Thread(target=watch, name="orbit-parent-watch", daemon=True).start()
 
 
 def main() -> int:
@@ -93,6 +123,7 @@ def main() -> int:
         return 0
 
     collection = None if args.demo else CollectionManager(history, data_dir)
+    _exit_when_parent_dies()
     _fetch_logo_in_background()
     restart_requested = threading.Event()
     holder: dict = {}

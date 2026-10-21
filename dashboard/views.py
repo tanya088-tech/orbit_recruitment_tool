@@ -33,7 +33,9 @@ NOTICES = {
     "started": "Collection started. This page updates while it runs.",
     "already": "A collection is already running. Wait for it to finish before starting another.",
     "bad": "That collection option is not available.",
-    "bad_source": "Tick at least one source to collect from.",
+    "bad_source": "Choose a source to collect from.",
+    "stopping": "Stopping the search. Vacancies found so far are kept; this page updates when it has stopped.",
+    "not_running": "No collection is running.",
     "bad_count": "The number of vacancies must be a whole number from 1 to {max}, or left blank to collect all eligible vacancies.",
     "disabled": "Collection is turned off in demo mode.",
     "saved": "Showing the saved vacancies that match. No new search was run.",
@@ -274,7 +276,7 @@ def _fmt_time(iso: Optional[str], now: datetime) -> str:
 
 _STOP_LABELS = {"target_reached": "Target reached", "exhausted": "Results exhausted", "incomplete": "Some places could not be searched",
                 "blocked": "Finished (a source stopped early)", "interrupted": "Could not continue (interrupted)",
-                "time_limit": "Could not continue (time limit)", "error": "Failed"}
+                "time_limit": "Could not continue (time limit)", "error": "Failed", "stopped": "Stopped by you"}
 
 
 def _counts_html(st: dict[str, Any]) -> str:
@@ -356,18 +358,18 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
     # the form always opens with the defaults (LinkedIn + Naukri, India, last 24 hours); what the last run used is shown in its status above
     chosen_scope = cv["default_scope"] if cv["default_scope"] in loc_config.SCOPES else "india"
     chosen_window = settings.COLLECTION_DEFAULT_WINDOW
-    chosen_sources = [s for s in settings.COLLECTION_DEFAULT_SOURCES if s in settings.SUPPORTED_SOURCES]
+    chosen_source = settings.COLLECTION_DEFAULT_SOURCE if settings.COLLECTION_DEFAULT_SOURCE in settings.SUPPORTED_SOURCES else settings.SUPPORTED_SOURCES[0]
     count_value = int(st["target"]) if st.get("target") else ""
     scope_opts = "".join(
         f'<option value="{esc(k)}"{" selected" if k == chosen_scope else ""}>{esc(v)}</option>'
         for k, v in loc_config.SCOPES.items())
     disabled = " disabled" if (running or not enabled) else ""
     disabled_attr = disabled
-    source_boxes = "".join(
-        f'<label class="check"><input type="checkbox" name="source" value="{esc(s)}"'
-        f'{" checked" if s in chosen_sources else ""}{disabled_attr}> {esc(s)}'
-        + (f' <span class="sub">({esc(settings.SOURCE_FORM_NOTES[s])})</span>' if s in settings.SOURCE_FORM_NOTES else "")
-        + '</label>' for s in settings.SUPPORTED_SOURCES)
+    # one source per run, so a quick source never finishes the request on its own while the slower one is still searching
+    source_opts = "".join(
+        f'<option value="{esc(s)}"{" selected" if s == chosen_source else ""}>{esc(s)}'
+        + (f' ({esc(settings.SOURCE_FORM_NOTES[s])})' if s in settings.SOURCE_FORM_NOTES else "")
+        + '</option>' for s in settings.SUPPORTED_SOURCES)
     ff = st.get("fetch_filters") or {}
     def _fsel(name: str, label: str, opts: list) -> str:
         default = "yes" if (name == "contact" and not ff) else opts[0][0]       # vacancies with the poster's contact details first choice
@@ -398,7 +400,9 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
       <select id="collect-scope" name="scope"{disabled}>{scope_opts}</select>
       <span class="sub">Where the tool searches, and which job locations it keeps. The Location scope filter below only changes what is shown.</span>
       <input type="hidden" name="sources_sent" value="1">
-      <fieldset class="collect-sources"{disabled}><legend>Sources</legend>{source_boxes}</fieldset>
+      <label for="collect-source">Source</label>
+      <select id="collect-source" name="source"{disabled_attr}>{source_opts}</select>
+      <span class="sub">One source per run. Run the other source separately if you want both.</span>
       {gate_note}
       <label for="collect-window">Posted within</label>
       <select id="collect-window" name="window"{disabled}>{"".join(f'<option value="{k}"{" selected" if k == chosen_window else ""}>{esc(v[1])}</option>' for k, v in settings.COLLECTION_WINDOWS.items())}</select>
@@ -414,6 +418,9 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
       <button class="btn btn-primary" type="submit"{disabled}>{'Collection running...' if running else 'Run job collection'}</button>
       <button class="btn" type="submit" formaction="/collection/saved"{disabled} title="Instant: lists the vacancies already collected that match these choices. Nothing is searched.">Show saved vacancies</button>
     </form>
+    {'<form method="post" action="/collection/stop" class="collect-stop"><button class="btn btn-danger" type="submit" data-collect-stop'
+     + (' disabled>Stopping...' if st.get("stop_requested") else ' title="Stops the search. Vacancies found so far are kept.">Stop search')
+     + '</button></form>' if running and enabled else ""}
     <div class="collect-row">
       <a class="btn" href="{esc(here)}">Refresh dashboard</a>
       <form method="post" action="/app/restart"><button class="btn" type="submit"{" disabled" if running else ""}>Restart app</button></form>

@@ -282,3 +282,31 @@ Only GCC or BFSI vacancies are collected and shown. The same rules (`processing/
 * **Never eligible:** recruitment/staffing employers, agency postings ("hiring for our client"), unnamed ("Confidential") employers, and anything without clear evidence.
 
 The check runs when a job is collected (before it is saved) and again whenever the dashboard is built, so older history saved under looser rules is hidden without being deleted (`DISPLAY_ONLY_GCC_BFSI` in `config/settings.py`; `python check_history.py` shows what is hidden and why - it changes nothing).
+
+## October 2026 fixes
+
+* **Every LinkedIn listing is read.** LinkedIn's public search now returns 10 listings per page, so paging advances by the number
+  of listings actually returned (`LINKEDIN_PAGINATION = "returned"`); the old 25-per-page step skipped 15 of every 25. The page
+  cap was raised from 40 to 100 (`DEFAULT_MAX_PAGES`, `COLLECTION_MAX_PAGES`) so a search can still reach LinkedIn's ~1000 results.
+* **Overseas headquarters rule is on** (`REQUIRE_OVERSEAS_HQ = True`): only GCC / BFSI employers headquartered outside India are
+  kept. Indian employers (Axis Bank, AU Small Finance Bank, Bajaj Finserv ...) are hidden from the dashboard, never deleted.
+* **Known GCC employers.** `KNOWN_GCC_EMPLOYERS` in `config/filter_rules.py` lists multinationals whose India presence is a
+  capability centre (global banks, insurers, tech companies ...); a vacancy there is tagged GCC even when the posting never says
+  "GCC". `KNOWN_GCC_MIXED_EMPLOYERS` lists groups that also run an ordinary Indian business (factories, shops, field sales): they
+  count only for capability-centre titles (software, data, finance operations ...). Branch, retail-banking, store and field-sales
+  roles are never GCC from the name alone (they can still be BFSI). Both lists also give the headquarters country. Edit freely.
+* **One source per run.** The collection form now has a Source dropdown (LinkedIn or Naukri) instead of tick boxes, so a
+  quick source never fills the requested number on its own while the other is still searching. Run the other source separately.
+* **Stop search button.** While a collection runs, *Stop search* ends it: the vacancies found so far are saved and added as usual,
+  and no further place is searched (Mac and Windows).
+* **Faster Naukri.** Cards from employers that can never qualify (staffing firms, and India-headquartered employers while the
+  overseas rule is on) are no longer opened, and each Naukri keyword search opens only its share of the requested number
+  (`NAUKRI_KEYWORD_SHARE_FACTOR`) instead of the full number for every keyword.
+* **Naukri searches by employer.** Naukri does not understand "GCC" the way LinkedIn does, so it now searches the employers the
+  client wants by name (`NAUKRI_SEARCH_TERMS` in `config/settings.py`: global banks, insurers and capability-centre terms), each
+  term reading at most `NAUKRI_MAX_PAGES_PER_KEYWORD` result pages. LinkedIn keeps `COLLECTION_KEYWORDS`.
+* **Naukri locations.** Indian towns Naukri writes without the country ("Kotputli, Bhiwadi", "Sonipat( Kundli )") are read as
+  India; foreign places ("Saudi Arabia", "Doha", "Qatar, GCC, Gulf") stay foreign.
+* **Cards not worth opening.** A Naukri card whose title is clearly not GCC / BFSI work (telecaller, voice process, property
+  advisor, restaurant ...; `CARD_TITLE_SKIP_PATTERNS` in `config/filter_rules.py`) is not opened, unless the employer is a known
+  GCC / overseas-headquartered group.

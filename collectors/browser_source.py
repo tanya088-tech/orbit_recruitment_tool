@@ -14,6 +14,7 @@ from collectors.browser_client import BrowserClient
 from collectors.errors import BlockedError, LocalBrowserError, NotFoundError
 from config import settings
 from models.job import Job, RunStats, SearchParams
+from processing.classifier import skip_before_fetch_reason
 from utils.dates import is_within_days
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,10 @@ class BrowserListSource(JobSource):
 
     def effective_days(self, params: SearchParams) -> int:
         return params.days
+
+    def card_skip_reason(self, stub: dict[str, Any], params: SearchParams) -> Optional[str]:
+        """A source-specific reason to leave a search card unopened (None = open it)."""
+        return None
 
     # -- the loop --------------------------------------------------------------
     def search(self, params: SearchParams, stats: RunStats, skip_ids: Optional[set[str]] = None) -> Iterator[Job]:
@@ -89,6 +94,12 @@ class BrowserListSource(JobSource):
                         continue
                     if not is_within_days(stub.get("posted_date"), days):
                         stats.skipped_out_of_range += 1
+                        continue
+                    why = (skip_before_fetch_reason(stub.get("company"), stub.get("title"))
+                           if (settings.COLLECTION_SKIP_INELIGIBLE_BEFORE_FETCH and (stub.get("company") or stub.get("title"))) else None)
+                    why = why or self.card_skip_reason(stub, params)
+                    if why:       # same as LinkedIn: opening a page in the browser is the slow part, so skip what cannot qualify
+                        log.info("Not opening %s: %s %s", stub["job_url"], stub.get("company") or "(no company)", why)
                         continue
                     try:
                         job = self._collect_one(stub)

@@ -58,7 +58,8 @@ def test_gcc_self_description():
 
 
 def test_a_gcc_style_company_name_is_never_enough_by_itself():
-    for name in ("Electrical GCC", "Acme GBS Global Business Services", "Acme Global Capability Centre India", "Walmart Global Tech"):
+    # (a group on the KNOWN_GCC lists, such as Walmart Global Tech, is the exception: see tests/test_known_gcc.py)
+    for name in ("Electrical GCC", "Acme GBS Global Business Services", "Acme Global Capability Centre India"):
         assert not c(company=name).eligible, name
         assert not c(company=name, industries="IT Services & Consulting", description="Lead enterprise IT strategy.").eligible, name
         assert not c(company=name, industries="IT & Software").eligible, name

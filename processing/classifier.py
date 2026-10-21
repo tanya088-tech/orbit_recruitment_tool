@@ -52,7 +52,12 @@ _FIELD_LABEL = {
 
 
 _OVERSEAS_HQ = [(re.compile(p, re.IGNORECASE), c) for p, c in R.OVERSEAS_HQ_EMPLOYERS]
+_GCC_KNOWN = [(re.compile(p, re.IGNORECASE), c) for p, c in R.KNOWN_GCC_EMPLOYERS]
+_GCC_KNOWN_MIXED = [(re.compile(p, re.IGNORECASE), c) for p, c in R.KNOWN_GCC_MIXED_EMPLOYERS]
+_GCC_CAPABILITY_TITLE = _compile(R.GCC_CAPABILITY_TITLE_PATTERNS)
+_GCC_NAME_NOT_FOR_TITLE = _compile(R.GCC_NAME_NOT_FOR_TITLE_PATTERNS)
 _INDIA_HQ = _compile(R.INDIA_HQ_EMPLOYERS)
+_CARD_TITLE_SKIP = _compile(R.CARD_TITLE_SKIP_PATTERNS)
 _HQ_STATEMENTS = _compile(R.HQ_STATEMENT_PATTERNS)
 _HQ_ADJECTIVE = re.compile(R.HQ_ADJECTIVE_PATTERN, re.IGNORECASE)
 _INDIA_PLACES = {x.lower() for x in R.INDIA_CITIES} | {x.lower() for x in R.INDIA_STATES} | {"india", "bharat"}
@@ -99,10 +104,28 @@ def _headquarters(company: Optional[str], desc: str) -> tuple[Optional[str], str
     name = " ".join(str(company or "").lower().split())
     if name and _hits(_INDIA_HQ, name):
         return "india", "India", "employer headquartered in India"
-    for pat, country in _OVERSEAS_HQ:
+    for pat, country in _OVERSEAS_HQ + _GCC_KNOWN + _GCC_KNOWN_MIXED:
         if name and pat.search(name):
             return "overseas", country, f"known employer headquartered in {country}"
     return None, "", ""
+
+
+def known_gcc_employer(company: Optional[str], title: Optional[str] = None) -> Optional[str]:
+    """The matched name when the company is a known GCC employer (config/filter_rules.py), else None. A group that also runs an
+    ordinary Indian business (KNOWN_GCC_MIXED_EMPLOYERS) matches only when `title` is capability-centre work."""
+    name = " ".join(str(company or "").lower().split())
+    if not name:
+        return None
+    for pat, _country in _GCC_KNOWN:
+        m = pat.search(name)
+        if m:
+            return m.group(0)
+    if _hits(_GCC_CAPABILITY_TITLE, title):
+        for pat, _country in _GCC_KNOWN_MIXED:
+            m = pat.search(name)
+            if m:
+                return m.group(0)
+    return None
 
 def headquarters_of(company: Optional[str], desc: Optional[str]) -> tuple[str, str, str]:
     """Parent-company headquarters for the dashboard filter: ('outside' | 'india' | 'unknown', country, evidence).
@@ -183,6 +206,33 @@ def employer_can_never_qualify(company: Optional[str]) -> bool:
     Used to avoid downloading a detail page that could not change the outcome."""
     c = " ".join(str(company or "").lower().split()).strip(" .-")
     return bool(_hits(_STAFF_CO, company)) or _unclear_company(company) or c in R.PLACEHOLDER_COMPANY_NAMES
+
+
+def _known_overseas_employer(name: str) -> bool:
+    return any(pat.search(name) for pat, _c in _OVERSEAS_HQ + _GCC_KNOWN + _GCC_KNOWN_MIXED)
+
+
+def is_known_overseas_employer(company: Optional[str]) -> bool:
+    """True when the name is on one of the reference lists of overseas-headquartered / known GCC employers."""
+    name = " ".join(str(company or "").lower().split())
+    return bool(name) and _known_overseas_employer(name)
+
+
+def skip_before_fetch_reason(company: Optional[str], title: Optional[str] = None) -> Optional[str]:
+    """Why a search-result card can be passed over without opening its detail page, or None to open it. Besides the
+    employers that can never qualify, with REQUIRE_OVERSEAS_HQ an employer on the India-headquartered list is skipped too
+    (Axis Bank, IDFC FIRST Bank, Bajaj Finserv ...): such a vacancy is kept only in the rare case that its posting names an
+    overseas headquarters, and opening every one of them is what makes a search slow."""
+    if employer_can_never_qualify(company):
+        return "can never qualify"
+    name = " ".join(str(company or "").lower().split())
+    if settings.REQUIRE_OVERSEAS_HQ and name and _hits(_INDIA_HQ, name):
+        return "can never qualify (headquartered in India)"
+    # title on the card (Naukri): clearly not GCC / BFSI work - unless the employer is a known GCC / overseas group
+    hit = _hits(_CARD_TITLE_SKIP, title) if title else []
+    if hit and not (name and _known_overseas_employer(name)):
+        return f"is not a GCC / BFSI role (title: {hit[0]})"
+    return None
 
 
 def classify(
@@ -285,6 +335,9 @@ def classify(
         mnc = _hits(_GCC_MNC, desc)
         if name_terms and mnc:
             signals.append(Signal("gcc", "company", f"{name_terms[0]} (+ multinational wording in the description: {mnc[0]})", "weak"))
+    if not unclear and not any(s.category == "gcc" for s in signals) and not _hits(_GCC_NAME_NOT_FOR_TITLE, title):
+        if known_gcc_employer(company, title):
+            signals.append(Signal("gcc", "company", f"{company.strip()} (known GCC employer)", "strong"))
 
     if unclear and signals and not ind_bfsi:
         signals = []

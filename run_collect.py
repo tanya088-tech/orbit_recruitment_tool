@@ -8,6 +8,7 @@ Examples
 """
 import argparse
 import logging
+import signal
 
 from collectors.collector import Collector
 from collectors.registry import available_sources, get_source
@@ -38,7 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _break_as_interrupt(signum, frame):
+    raise KeyboardInterrupt
+
+
 def main() -> int:
+    if hasattr(signal, "SIGBREAK"):
+        # Windows: the dashboard's Stop button sends Ctrl+Break. Treat it like Ctrl+C, so what was collected is saved.
+        signal.signal(signal.SIGBREAK, _break_as_interrupt)
     args = build_parser().parse_args()
     log_file = setup_logging(args.log_level)
     log = logging.getLogger("run_collect")

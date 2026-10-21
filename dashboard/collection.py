@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -60,7 +61,8 @@ _BLOCKED_LINE = re.compile(r"SOURCE BLOCKED US - stopping run\. Reason:\s*(.*)$"
 _SETUP_LINE = re.compile(r"SETUP REQUIRED:\s*(.*)$")
 _ERROR_LINE = re.compile(r"\|\s*(ERROR|CRITICAL)\s*\|\s*(.*)$")
 LOG_TAIL = 30
-STALE_LOCK_SECONDS = 600      # a live run refreshes its lock with every progress save; older than this = left behind
+STOP_GRACE_SECONDS = 20       # after Stop, a scraper gets this long to save what it collected before it is ended
+STALE_LOCK_SECONDS = 600     # a live run refreshes its lock with every progress save; older than this = left behind
 
 Runner = Callable[[list[str], Callable[[str], None], Path, float], int]
 
@@ -89,6 +91,15 @@ def parse_target(value: Any) -> Optional[int]:
     return n if 1 <= n <= settings.COLLECTION_TARGET_MAX else None
 
 
+def source_keywords(source: str) -> list[str]:
+    """What is searched on each source. Naukri searches the employers and role terms in NAUKRI_SEARCH_TERMS (one combined
+    entry, so the source merges the terms newest first); every other source uses COLLECTION_KEYWORDS."""
+    terms = [t.strip() for t in getattr(settings, "NAUKRI_SEARCH_TERMS", []) if t and t.strip()]
+    if source == "naukri" and terms:
+        return [" OR ".join(terms)]
+    return list(settings.COLLECTION_KEYWORDS)
+
+
 def build_command(scope: str, output_dir: Path, locations: Optional[list[str]] = None,
                   skip_ids_file: Optional[Path] = None, max_jobs: Optional[int] = None,
                   count_known: bool = False, exclude_ids_file: Optional[Path] = None, days: Optional[int] = None,
@@ -100,7 +111,7 @@ def build_command(scope: str, output_dir: Path, locations: Optional[list[str]] =
     return [
         sys.executable, str(ROOT / "run_collect.py"),
         *(["--source", source] if source != "linkedin" else []),
-        "--keywords", *settings.COLLECTION_KEYWORDS,
+        "--keywords", *source_keywords(source),
         "--locations", *(locations if locations is not None else loc_config.search_locations(scope)),
         "--days", str(days if days is not None else settings.COLLECTION_DAYS),
         "--max-jobs-per-search", str(max_jobs if max_jobs is not None else settings.COLLECTION_MAX_JOBS_PER_SEARCH),
@@ -112,10 +123,16 @@ def build_command(scope: str, output_dir: Path, locations: Optional[list[str]] =
     ]
 
 
-def subprocess_runner(cmd: list[str], on_line: Callable[[str], None], cwd: Path, timeout_s: float) -> int:
-    """Run the scraper, feeding each output line to on_line. Kills it after timeout_s."""
+def subprocess_runner(cmd: list[str], on_line: Callable[[str], None], cwd: Path, timeout_s: float,
+                      on_start: Optional[Callable[[subprocess.Popen], None]] = None) -> int:
+    """Run the scraper, feeding each output line to on_line. Kills it after timeout_s. on_start receives the process
+    (so the Stop button can reach it). On Windows it gets its own process group so it can be asked to stop with
+    Ctrl+Break without the dashboard receiving it too."""
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
     proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                            encoding="utf-8", errors="replace", bufsize=1)
+                            encoding="utf-8", errors="replace", bufsize=1, creationflags=flags)
+    if on_start is not None:
+        on_start(proc)
     timer = threading.Timer(timeout_s, proc.kill)
     timer.start()
     try:
@@ -125,6 +142,17 @@ def subprocess_runner(cmd: list[str], on_line: Callable[[str], None], cwd: Path,
         return proc.wait()
     finally:
         timer.cancel()
+
+
+def ask_to_stop(proc: subprocess.Popen) -> None:
+    """Ask a running scraper to stop the way Ctrl+C would: it saves the jobs collected so far, then exits."""
+    try:
+        if os.name == "nt":
+            proc.send_signal(signal.CTRL_BREAK_EVENT)     # run_collect.py turns this into KeyboardInterrupt
+        else:
+            proc.send_signal(signal.SIGINT)
+    except (OSError, ValueError):
+        pass
 
 
 def _pid_alive(pid: int) -> bool:
@@ -146,7 +174,10 @@ class CollectionManager:
         self.history = history
         self.data_dir = Path(data_dir)
         self.output_dir = Path(output_dir or settings.OUTPUT_DIR)
-        self.runner = runner or subprocess_runner
+        self.runner = runner or self._tracked_runner
+        self._stop_event = threading.Event()        # set by the Stop button; the run ends after the current step
+        self._procs: set[subprocess.Popen] = set()  # scraper processes running now (only with the real runner)
+        self._procs_lock = threading.Lock()
         # one browser for the whole run (real runs only; tests with fake runners opt in explicitly)
         self.share_browser: bool = runner is None
         self.browser_host_factory: Callable[[], Any] = lambda: BrowserHost(settings.BROWSER_PROFILE_DIR)
@@ -219,12 +250,56 @@ class CollectionManager:
         with self._mutex:
             if self._s["state"] == RUNNING:
                 self._s.update(state=FAILED, step=None, finished_at=self.now().isoformat(timespec="seconds"),
-                               pending_recovery_since=self._s.get("started_at"),
+                               pending_recovery_since=self._s.get("started_at"), stop_requested=False,
                                last_error="The collection was interrupted because the app was closed. "
                                           "Jobs already saved are added the next time the app starts.",
                                message="The collection was interrupted.")
                 self._save(force=True)
+        self._end_processes(grace_s=5.0)        # the scraper runs in its own process group, so it would not see Ctrl+C
         self._release_lock()
+
+    # ------------------------------------------------------------ stop button
+    def _tracked_runner(self, cmd: list[str], on_line: Callable[[str], None], cwd: Path, timeout_s: float) -> int:
+        holder: dict[str, subprocess.Popen] = {}
+
+        def started(proc: subprocess.Popen) -> None:
+            holder["proc"] = proc
+            with self._procs_lock:
+                self._procs.add(proc)
+            if self._stop_event.is_set():           # Stop was pressed while this one was starting
+                ask_to_stop(proc)
+        try:
+            return subprocess_runner(cmd, on_line, cwd, timeout_s, on_start=started)
+        finally:
+            with self._procs_lock:
+                self._procs.discard(holder.get("proc"))
+
+    def _end_processes(self, grace_s: float) -> None:
+        """Ask every running scraper to save and stop; end any that is still running after grace_s seconds."""
+        with self._procs_lock:
+            procs = list(self._procs)
+        for p in procs:
+            ask_to_stop(p)
+        deadline = time.monotonic() + grace_s
+        for p in procs:
+            try:
+                p.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                p.kill()
+            except OSError:
+                pass
+
+    def stop(self) -> bool:
+        """The Stop button: end the running collection. Each scraper saves what it collected so far, those jobs are
+        added as usual, and no further place or source is searched. False when nothing is running."""
+        with self._mutex:
+            if self._s["state"] != RUNNING:
+                return False
+            self._stop_event.set()
+            self._s.update(stop_requested=True, message="Stopping the search. Saving the vacancies found so far...")
+            self._save(force=True)
+        threading.Thread(target=self._end_processes, args=(STOP_GRACE_SECONDS,), name="orbit-stop", daemon=True).start()
+        return True
 
     def _save(self, force: bool = False) -> None:
         if not force and time.monotonic() - self._last_write < 1.0:
@@ -373,11 +448,12 @@ class CollectionManager:
                 return False, "A collection is already running. Wait for it to finish."
             if not self._acquire_lock():
                 return False, "A collection is already running in another Ace Talent Consulting window."
+            self._stop_event.clear()
             total = len(loc_config.search_locations(scope)) * len(chosen)
             self._s.update(state=RUNNING, scope=scope, sources=chosen_display, step="collecting", search_done=0, search_total=total,
                            target=target, window=window, collected_unique=0, new_added=0, already_had=0, duplicates_skipped=0, result_keys=[], result_at=None,
                            skipped_not_relevant=0, skipped_out_of_scope=0, skipped_filters=0, fetch_filters=fetch_filters, per_source={}, stop_reason=None, last_summary=None,
-                           current_search=None, started_at=self.now().isoformat(timespec="seconds"), finished_at=None,
+                           stop_requested=False, current_search=None, started_at=self.now().isoformat(timespec="seconds"), finished_at=None,
                            last_error=None, warnings=[], log_tail=[],
                            message=(f"Collecting the {target} most recent vacancies ({settings.COLLECTION_WINDOWS[window][1].lower()}, {loc_config.SCOPES[scope]}).{match_note}{wait_note} This can take a while."
                                     if target else f"Collecting all eligible vacancies ({settings.COLLECTION_WINDOWS[window][1].lower()}, {loc_config.SCOPES[scope]}), within the dashboard's search limits.{match_note}{wait_note} This can take a while."))
@@ -618,10 +694,10 @@ class CollectionManager:
                 label = pretty.get(src, src)
                 src_stop = False
                 for n, place in enumerate(places_for(src)):
-                    if src_reached(src) or src_stop or interrupted or timed_out:
+                    if src_reached(src) or src_stop or interrupted or timed_out or self._stop_event.is_set():
                         break
                     rounds = 0
-                    while not (src_stop or interrupted or timed_out or src_reached(src)):
+                    while not (src_stop or interrupted or timed_out or src_reached(src) or self._stop_event.is_set()):
                         remaining = deadline - time.time()
                         if remaining <= 0:
                             timed_out = True
@@ -709,6 +785,8 @@ class CollectionManager:
                                     fetched_ids = {str(j.get("job_id")) for j in jobs}
                                     src_totals[src]["already"] += len([i for i in latest if i not in fetched_ids])   # counted but not re-fetched
                                 self._update(last_summary=dict(totals, scope=scope, jobs_file=path.name), **counts())
+                        elif self._stop_event.is_set():
+                            pass                       # ended by the Stop button: not a problem with the place
                         elif code not in (0, EXIT_BLOCKED):
                             problems.append(f"{(label + ' - ') if len(sources) > 1 else ''}{place}: the collector stopped with an error (exit code {code}).")
                         elif path is None:
@@ -719,7 +797,7 @@ class CollectionManager:
                             blocked_why[label] = short_reason(captured.get("blocked"))
                             problems.append(f"{label} blocked: {blocked_why[label]}. Not retried.")
                             src_stop = True
-                        if captured.get("interrupted"):
+                        if captured.get("interrupted") and not self._stop_event.is_set():
                             interrupted = True
                         # Search the same place again only when this pass hit its cap yet some postings could not be
                         # matched to a stored vacancy (a repeat under another id), so the target is still short.
@@ -773,7 +851,11 @@ class CollectionManager:
                     f"{name} {c['in_result']} shown of {c['found'] + c['already']} found" if target else f"{name} {c['new'] + c['existing']} collected of {c['found'] + c['already']} found"
                     for name, c in ps.items()) + "."
             total_places = sum(len(places_for(s)) for s in sources)
-            if blocked:
+            if self._stop_event.is_set():
+                self._update(state=PARTIAL, step=None, finished_at=finished, last_summary=summary, search_done=sum(done_by.values()), stop_reason="stopped",
+                             stop_requested=False, last_error=None, warnings=(self._s["warnings"] + problems)[:12],
+                             message=f"Stopped by you. Got {got} vacancies; the ones found before stopping were added.{skipped_note}", **extra)
+            elif blocked:
                 self._update(state=PARTIAL, step=None, finished_at=finished, last_summary=summary, search_done=sum(done_by.values()), stop_reason="blocked",
                              last_error=(f"{names} started refusing requests, so that source stopped ({'; '.join(f'{k}: {v}' for k, v in blocked_why.items())}). "
                                          "The tool does not retry or work around a block; jobs collected before it were added. "
@@ -814,7 +896,7 @@ class CollectionManager:
                              warnings=(self._s["warnings"] + problems)[:12], message=msg, **extra)
         except Exception as exc:
             log.exception("collection failed")
-            self._update(state=FAILED, step=None, finished_at=self.now().isoformat(timespec="seconds"), stop_reason="error",
+            self._update(state=FAILED, step=None, finished_at=self.now().isoformat(timespec="seconds"), stop_reason="error", stop_requested=False,
                          last_error=f"{type(exc).__name__}: {exc}"[:600], message="The collection did not finish.")
         finally:
             if host is not None:

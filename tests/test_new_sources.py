@@ -535,7 +535,7 @@ def _naukri_run(error, monkeypatch):
     return res, page
 
 
-def test_repeated_browser_crashes_stop_the_place_without_reporting_a_block(monkeypatch=None):
+def test_repeated_browser_crashes_stop_the_place_without_reporting_a_block(monkeypatch):
     monkeypatch.setattr(settings, "MAX_CONSECUTIVE_FAILURES", 1)             # even the strictest "blocked" breaker must not fire
     monkeypatch.setattr(settings, "MAX_CONSECUTIVE_BROWSER_FAILURES", 2)
     res, page = _naukri_run(RuntimeError("TargetClosedError: Page.goto: Page crashed"), monkeypatch)
@@ -544,7 +544,7 @@ def test_repeated_browser_crashes_stop_the_place_without_reporting_a_block(monke
     assert len(detail_visits) == 2 * (settings.BROWSER_RECOVERY_RETRIES + 1)
 
 
-def test_repeated_ordinary_failures_still_trip_the_blocked_breaker(monkeypatch=None):
+def test_repeated_ordinary_failures_still_trip_the_blocked_breaker(monkeypatch):
     monkeypatch.setattr(settings, "MAX_CONSECUTIVE_FAILURES", 2)
     res, _ = _naukri_run(RuntimeError("Page.goto: Timeout 30000ms exceeded"), monkeypatch)
     assert res.stats.blocked

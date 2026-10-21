@@ -157,8 +157,9 @@ def test_form_ticks_choose_the_sources_and_last_run_is_shown_back(tmp_path):
         assert call(port, "POST", "/collection/run", form)[1]["location"] == "/?notice=started"
         assert set(calls) == {"linkedin", "naukri"} and mgr.status()["sources"] == ["LinkedIn", "Naukri"]
         h = get(port, "/?scope=all")[2]
-        for name in ("LinkedIn", "Naukri"):
-            assert f'value="{name}" checked' in h
+        # the form offers ONE source per run (a dropdown); the server still accepts a list, as above
+        assert '<select id="collect-source" name="source">' in h and 'type="checkbox" name="source"' not in h
+        assert '<option value="LinkedIn" selected>' in h and '<option value="Naukri">' in h
         assert 'value="Indeed"' not in h
         none = [("scope", "india"), ("count", "5"), ("sources_sent", "1")]       # nothing ticked
         assert call(port, "POST", "/collection/run", none)[1]["location"] == "/?notice=bad_source"

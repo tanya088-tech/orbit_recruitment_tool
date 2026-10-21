@@ -31,14 +31,14 @@ MAX_CONSECUTIVE_BROWSER_FAILURES = 3    # pages in a row that could not be loade
 
 # --- Search defaults ---
 DEFAULT_DAYS = 7
-DEFAULT_MAX_PAGES = 40       # 40 pages x 25 results = LinkedIn's practical ~1000 cap
+DEFAULT_MAX_PAGES = 100      # LinkedIn now returns 10 results per page: 100 pages x 10 = its practical ~1000 cap
 DEFAULT_MAX_JOBS_PER_SEARCH = 10   # small cap for test runs; 0 = unlimited
 
 # How the search page offset ("start") advances between result pages.
 #   "fixed"    - start = page * 25 (the original behaviour; assumes every page returns 25 listings)
 #   "returned" - start advances by the number of listings the previous page actually returned, so no listing
 #                is skipped if a page returns fewer than 25 (e.g. 10). Run verify_pagination.py once, then choose.
-LINKEDIN_PAGINATION = "fixed"
+LINKEDIN_PAGINATION = "returned"   # live runs show 10 listings per page, so "fixed" skipped 15 of every 25
 
 DEFAULT_KEYWORDS = ["GCC OR global capability center OR bank OR financial services OR insurance OR NBFC"]   # GCC (any industry) + BFSI
 DEFAULT_LOCATIONS = list(INDIA_SEARCH_LOCATIONS)   # all of India (India-wide + major cities); no single-city default
@@ -74,7 +74,7 @@ DISPLAY_TZ_LABEL = "IST"
 COLLECTION_KEYWORDS = DEFAULT_KEYWORDS            # change to widen or narrow what is searched
 COLLECTION_DAYS = 30                              # LinkedIn "posted within" window (30 days = the dashboard's "Last month")
 COLLECTION_MAX_JOBS_PER_SEARCH = 0                # 0 = no cap: take everything LinkedIn returns for each place
-COLLECTION_MAX_PAGES = 40                         # 40 pages x 25 = LinkedIn's practical ~1000 results per search
+COLLECTION_MAX_PAGES = 100                        # 100 pages x 10 = LinkedIn's practical ~1000 results per search
 COLLECTION_TIMEOUT_MINUTES = 1440                 # a run that takes longer than this is stopped
 COLLECTION_DEFAULT_SCOPE = "india"                # "india" | "both" | "international"
 COLLECTION_TARGET_CHOICES = (50, 100, 200)       # quick picks offered next to the "Number of vacancies" box
@@ -83,16 +83,33 @@ COLLECTION_DEFAULT_WINDOW = "24h"                 # a "N vacancies" request mean
 COLLECTION_TARGET_MAX = 1000                      # the largest number a recruiter can ask for in one run
 # The client's eligibility rule: only GCC / BFSI employers headquartered OUTSIDE India, for vacancies located IN India.
 # (Tests switch these off by default because their fake employers carry no headquarters evidence; the tests of the rule switch them on.)
-REQUIRE_OVERSEAS_HQ = False
+REQUIRE_OVERSEAS_HQ = True
 REQUIRE_INDIA_LOCATION = True
 COLLECTION_STRICT_WINDOW = True                  # while collecting, drop postings whose own date shows they are older than the 'posted within' choice
 COLLECTION_CANDIDATE_POOL_FACTOR = 2                # with a target N, gather up to N x this many newest candidates, then keep the best N (1 = exactly N)
 COLLECTION_RECENCY_TOLERANCE_HOURS = 24           # postings within the same window of this many hours count as 'similar recency'
-COLLECTION_SKIP_INELIGIBLE_BEFORE_FETCH = True    # do not download the detail page of a posting whose search card already shows a staffing / unnamed employer (it can never qualify)
+COLLECTION_SKIP_INELIGIBLE_BEFORE_FETCH = True    # do not download the detail page of a posting whose search card already shows a staffing / unnamed employer,
+                                                  # or (with REQUIRE_OVERSEAS_HQ) an employer headquartered in India: it can never qualify
+NAUKRI_KEYWORD_SHARE_FACTOR = 2                   # with a number of vacancies N, Naukri opens about N / keywords x this many postings per keyword
+                                                  # (each keyword is a separate Naukri search), instead of N for every keyword. 0 = N per keyword (old)
+NAUKRI_MAX_PAGES_PER_KEYWORD = 5                  # Naukri result pages read per search term (20 listings each); keeps a run with many terms bounded
+# What the dashboard searches on Naukri. Naukri does not understand "GCC" the way LinkedIn does (it returned mostly BPO, staffing and
+# real-estate jobs), so Naukri searches the employers the client wants by name, plus a few role terms. Each entry is one Naukri search;
+# results are merged newest first. Edit freely (fewer terms = faster). Empty list = use COLLECTION_KEYWORDS like LinkedIn.
+NAUKRI_SEARCH_TERMS = [
+    # global banks, insurers and financial-services groups with large India capability centres
+    "JPMorgan Chase", "Wells Fargo", "Citi", "Bank of America", "Goldman Sachs", "Morgan Stanley", "Barclays", "HSBC",
+    "Standard Chartered", "Deutsche Bank", "BNP Paribas", "UBS", "NatWest", "Lloyds Technology Centre", "State Street",
+    "Northern Trust", "BNY", "American Express", "Synchrony", "Fidelity Investments", "BlackRock", "MetLife", "Chubb",
+    "Allianz", "Societe Generale", "DBS Bank", "Mastercard", "Fiserv", "FIS Global", "Nomura", "MUFG", "Macquarie",
+    "Swiss Re", "Commonwealth Bank",
+    # role terms used by capability centres
+    "global capability centre", "global in-house centre",
+]
 COLLECTION_PARALLEL_SOURCES = True               # search LinkedIn and Naukri at the same time (different sites, each keeps its own pacing)
 COLLECTION_ROUNDS_PER_PLACE = 4                   # extra passes over one place when a pass added fewer unique vacancies than it fetched
 SUPPORTED_SOURCES = ("LinkedIn", "Naukri")   # shown in the Source filter and the main collection form even before a source has any jobs
-COLLECTION_DEFAULT_SOURCES = ("LinkedIn", "Naukri")   # sources ticked in the collection form every time it opens
+COLLECTION_DEFAULT_SOURCE = "LinkedIn"            # source pre-selected in the collection form (one source per run)
 COLLECTION_SKIP_KNOWN_IDS = True                  # do not re-fetch detail pages for jobs already in the history
 
 # Shown in the dashboard when a source blocks the tool (source name -> extra advice). Empty: the default message is used.
