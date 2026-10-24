@@ -26,6 +26,7 @@ from processing.location import check_location
 from processing.normalize import clean_company, clean_location
 from processing.work_mode import FILTER_WORK_MODES, UNKNOWN, work_mode_for   # Phase 2 work-mode rules (reused)
 from store.base import DEFAULT_STATUS, STATUSES
+from store.keys import is_repost, vacancy_fingerprint
 from utils.dates import parse_iso_datetime
 
 UTC = timezone.utc
@@ -354,6 +355,28 @@ def linkedin_company_page(url: Any) -> Optional[str]:
     return f"https://www.linkedin.com/company/{m.group(1).lower()}" if m else None
 
 
+def _fold_reposts(rows: list["Row"], recs: Mapping[str, Mapping[str, Any]]) -> list["Row"]:
+    """Show a re-posted vacancy once. A later row that is a repost of an earlier one (store.keys.is_repost: same source,
+    company, title and city, nearly the same description) is folded into the earlier row as an "also listed on" link,
+    but only while nobody has worked on it (no notes, not saved, default status), so nothing a recruiter did is hidden.
+    The history file is not changed."""
+    by_print: dict[str, list["Row"]] = {}
+    out = []
+    for row in rows:
+        rec = recs.get(row.key) or {}
+        fp = vacancy_fingerprint(rec)
+        untouched = not row.notes and not row.saved and row.status == DEFAULT_STATUS
+        twin = next((r for r in by_print.get(fp or "", []) if is_repost(recs.get(r.key) or {}, rec)), None) if (fp and untouched) else None
+        if twin is not None:
+            if not any((str(a.get("source")), str(a.get("job_id"))) == (str(row.source), str(row.job_id)) for a in twin.also_listed_on):
+                twin.also_listed_on.append({"source": row.source, "job_id": row.job_id, "job_url": row.job_url})
+            continue
+        if fp:
+            by_print.setdefault(fp, []).append(row)
+        out.append(row)
+    return out
+
+
 def _share_company_links(rows: list["Row"]) -> None:
     """Fill the company link only from what a source itself stated, and only when it is unambiguous.
 
@@ -393,12 +416,14 @@ def assess_record(rec: Mapping[str, Any]):
 
 def build_rows(jobs: list[dict[str, Any]], states: Mapping[str, Mapping[str, Any]],
                latest_run_id: Optional[str], only_gcc_bfsi: Optional[bool] = None,
-               team_posters: Optional[Mapping[str, Any]] = None) -> list[Row]:
+               team_posters: Optional[Mapping[str, Any]] = None, fold_reposts: bool = True) -> list[Row]:
     """Rows for the dashboard. With only_gcc_bfsi (default: settings.DISPLAY_ONLY_GCC_BFSI) a stored job that
-    does not pass the strict rules is left out of the view - it stays in the history file untouched."""
+    does not pass the strict rules is left out of the view - it stays in the history file untouched.
+    With fold_reposts, a vacancy re-posted on the same source under a new id is shown once (see _fold_reposts)."""
     if only_gcc_bfsi is None:
         only_gcc_bfsi = settings.DISPLAY_ONLY_GCC_BFSI
     rows = []
+    recs: dict[str, dict[str, Any]] = {}
     # Learn state names only from India jobs (a "Hyderabad, Sindh, Pakistan" must not teach Hyderabad -> Sindh).
     resolve_region = build_region_resolver(
         clean_location((e.get("record") or {}).get("location")) for e in jobs if (e.get("record") or {}).get("country") == "India")
@@ -457,6 +482,9 @@ def build_rows(jobs: list[dict[str, Any]], states: Mapping[str, Mapping[str, Any
             company_rating=_valid_rating(rec.get("company_rating")), company_reviews=_valid_reviews(rec.get("company_reviews")),
             potential_gcc=verdict.potential_gcc, potential_bfsi=verdict.potential_bfsi, category_reason=verdict.reason,
         ))
+        recs[entry["key"]] = rec
+    if fold_reposts:
+        rows = _fold_reposts(rows, recs)
     for r_ in rows:
         _fill_contacts(r_)
     _share_company_links(rows)
@@ -689,7 +717,8 @@ def fetch_filter_matches(records: list[dict[str, Any]], filters: Optional[Mappin
     if not filters and max_age_hours is None:
         return [True] * len(records)
     filters = filters or {}
-    rows = build_rows([{"key": str(i), "record": rec} for i, rec in enumerate(records)], {}, None, only_gcc_bfsi=False)
+    rows = build_rows([{"key": str(i), "record": rec} for i, rec in enumerate(records)], {}, None, only_gcc_bfsi=False,
+                      fold_reposts=False)          # one answer per record: a repost is merged later, when it is stored
     f = Filters(employment=filters.get("employment", "all"), work_mode=filters.get("work_mode", "all"),
                 state=filters.get("state", ""), contact=filters.get("contact", "all"), scope="all")   # location scope is the collection's own gate
     now = datetime.now(timezone.utc)

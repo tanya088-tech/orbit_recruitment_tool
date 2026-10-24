@@ -45,6 +45,7 @@ from store.base import JobHistoryStore
 from store.ingest import ingest_filtered_file
 from store.keys import normalize_job_url
 from utils.dates import parse_iso_datetime
+from utils.keep_awake import keep_awake
 from store.recovery import recover_unprocessed
 
 log = logging.getLogger(__name__)
@@ -55,7 +56,10 @@ EXIT_BLOCKED = 2            # run_collect.py: the source blocked us (it still sa
 EXIT_SETUP = 3              # run_collect.py: the source cannot run here yet (e.g. browser support not installed)
 _SEARCH_LINE = re.compile(r"\[(\w+)\] Search (\d+)/(\d+): (.*)$")
 _SAVED_LINE = re.compile(r"Saved (\d+) jobs to (.+)$")
-_PAGE_LINE = re.compile(r"Search page (\d+): (\d+) listings")
+_PAGE_LINE = re.compile(r"Search page (\d+): (\d+) listings", re.I)        # LinkedIn "Search page", Naukri "[naukri] search page"
+_SKIP_LINE = re.compile(r"\| Not opening ")                                 # a card left unopened because it cannot qualify
+_FETCHED_LINE = re.compile(r"\| Fetched job ")                              # a job page read
+_JOB_FAIL_LINE = re.compile(r"\| (Failed to collect|Job removed or missing)\b")      # a job page opened but not read
 _INTERRUPT_LINE = "Interrupted by user"
 _BLOCKED_LINE = re.compile(r"SOURCE BLOCKED US - stopping run\. Reason:\s*(.*)$")
 _SETUP_LINE = re.compile(r"SETUP REQUIRED:\s*(.*)$")
@@ -100,6 +104,31 @@ def source_keywords(source: str) -> list[str]:
     return list(settings.COLLECTION_KEYWORDS)
 
 
+def _blank_live() -> dict[str, int]:
+    """What the scraper has done so far in this run, read from its log lines as they arrive (shown while it runs).
+    Jobs are added to the list only when each pass is saved; these numbers are the work in between."""
+    return {"pages": 0, "cards": 0, "skipped": 0, "opened": 0, "fetched": 0}
+
+
+def naukri_places(places: list[str]) -> list[str]:
+    """Where Naukri is searched: the Indian places of the run are replaced by settings.NAUKRI_SEARCH_LOCATIONS (one India-wide
+    search per term instead of one per city); places outside India are kept. Empty setting = every place, as before."""
+    chosen = [p for p in (getattr(settings, "NAUKRI_SEARCH_LOCATIONS", ()) or ()) if p and str(p).strip()]
+    if not chosen:
+        return list(places)
+    in_india = [p for p in places if p.split(",")[-1].strip().lower() == "india"]
+    if not in_india:
+        return list(places)
+    out: list[str] = []
+    for p in places:
+        if p in in_india:
+            if p == in_india[0]:
+                out.extend(c for c in chosen if c not in out)
+        elif p not in out:
+            out.append(p)
+    return out
+
+
 def build_command(scope: str, output_dir: Path, locations: Optional[list[str]] = None,
                   skip_ids_file: Optional[Path] = None, max_jobs: Optional[int] = None,
                   count_known: bool = False, exclude_ids_file: Optional[Path] = None, days: Optional[int] = None,
@@ -129,8 +158,11 @@ def subprocess_runner(cmd: list[str], on_line: Callable[[str], None], cwd: Path,
     (so the Stop button can reach it). On Windows it gets its own process group so it can be asked to stop with
     Ctrl+Break without the dashboard receiving it too."""
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    # PYTHONUNBUFFERED: the scraper's output goes to a pipe, where Python would otherwise hold lines back in large blocks,
+    # so the dashboard would show progress in bursts (or only at the end) instead of line by line.
+    env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
     proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                            encoding="utf-8", errors="replace", bufsize=1, creationflags=flags)
+                            encoding="utf-8", errors="replace", bufsize=1, creationflags=flags, env=env)
     if on_start is not None:
         on_start(proc)
     timer = threading.Timer(timeout_s, proc.kill)
@@ -200,7 +232,7 @@ class CollectionManager:
                 "target": None, "window": None, "collected_unique": 0, "new_added": 0, "already_had": 0, "duplicates_skipped": 0, "skipped_not_relevant": 0, "skipped_out_of_scope": 0,
                 "per_source": {}, "skipped_filters": 0, "fetch_filters": {}, "stop_reason": None, "result_keys": [], "result_at": None,
                 "search_done": 0, "search_total": 0, "current_search": None, "started_at": None, "finished_at": None,
-                "last_success_at": None, "last_summary": None, "last_error": None, "warnings": [], "log_tail": []}
+                "last_success_at": None, "last_summary": None, "last_error": None, "warnings": [], "log_tail": [], "live": _blank_live()}
 
     def _load(self) -> dict[str, Any]:
         s = self._blank()
@@ -454,16 +486,21 @@ class CollectionManager:
                            target=target, window=window, collected_unique=0, new_added=0, already_had=0, duplicates_skipped=0, result_keys=[], result_at=None,
                            skipped_not_relevant=0, skipped_out_of_scope=0, skipped_filters=0, fetch_filters=fetch_filters, per_source={}, stop_reason=None, last_summary=None,
                            stop_requested=False, current_search=None, started_at=self.now().isoformat(timespec="seconds"), finished_at=None,
-                           last_error=None, warnings=[], log_tail=[],
+                           last_error=None, warnings=[], log_tail=[], live=_blank_live(),
                            message=(f"Collecting the {target} most recent vacancies ({settings.COLLECTION_WINDOWS[window][1].lower()}, {loc_config.SCOPES[scope]}).{match_note}{wait_note} This can take a while."
                                     if target else f"Collecting all eligible vacancies ({settings.COLLECTION_WINDOWS[window][1].lower()}, {loc_config.SCOPES[scope]}), within the dashboard's search limits.{match_note}{wait_note} This can take a while."))
             self._save(force=True)
         if self.background:
-            self._thread = threading.Thread(target=self._run, args=(scope, target, window, chosen, fetch_filters), name="orbit-collection", daemon=True)
+            self._thread = threading.Thread(target=self._run_awake, args=(scope, target, window, chosen, fetch_filters), name="orbit-collection", daemon=True)
             self._thread.start()
         else:
-            self._run(scope, target, window, chosen, fetch_filters)
+            self._run_awake(scope, target, window, chosen, fetch_filters)
         return True, "Collection started."
+
+    def _run_awake(self, *args: Any) -> None:
+        """The run, with the computer kept from sleeping until it ends (finished, stopped or failed)."""
+        with keep_awake(enabled=bool(getattr(settings, "COLLECTION_KEEP_AWAKE", False))):
+            self._run(*args)
 
     # ------------------------------------------------------------ the run
     # ------------------------------------------------------------ cooldown after a block
@@ -506,9 +543,19 @@ class CollectionManager:
     def _on_line(self, line: str, captured: dict[str, Any]) -> None:
         with self._mutex:
             self._s["log_tail"] = (self._s["log_tail"] + [line[-300:]])[-LOG_TAIL:]
+            live = self._s.setdefault("live", _blank_live())
             m = _PAGE_LINE.search(line)
             if m:
                 self._s.update(current_page=int(m.group(1)), listings_on_page=int(m.group(2)))
+                live["pages"] += 1
+                live["cards"] += int(m.group(2))
+            elif _SKIP_LINE.search(line):
+                live["skipped"] += 1
+            elif _FETCHED_LINE.search(line):
+                live["opened"] += 1
+                live["fetched"] += 1
+            elif _JOB_FAIL_LINE.search(line):
+                live["opened"] += 1
             if _INTERRUPT_LINE in line:
                 captured["interrupted"] = True
             m = _SETUP_LINE.search(line)
@@ -542,7 +589,11 @@ class CollectionManager:
 
         def places_for(src: str) -> list[str]:
             """A source that reads companies' careers pages does not depend on the city, so it is searched once, not once per place."""
-            return places[:1] if is_location_independent(src) else places
+            if is_location_independent(src):
+                return places[:1]
+            if src == "naukri":
+                return naukri_places(places)
+            return places
         days, window_label = (settings.COLLECTION_WINDOWS[window] if window else (settings.COLLECTION_DAYS, ""))
         within = f" posted in the {window_label.lower()}" if window_label else ""
         totals = {"collected": 0, "new": 0, "existing": 0, "duplicates_in_file": 0}
@@ -724,7 +775,7 @@ class CollectionManager:
                             src_stop = True
                             break
                         path = self._find_output(captured, started, src)
-                        fetched = added = 0
+                        fetched = added = rej_new = 0
                         latest: list[str] = []
                         if path is not None and code in (0, EXIT_BLOCKED):
                             with proc_lock:

@@ -17,6 +17,10 @@ document.querySelectorAll('[data-autosubmit]').forEach(function (el) {
         set('[data-count-new]', String(st.new_added || 0));
         set('[data-count-had]', String(st.already_had || 0));
         set('[data-count-rejected]', String((st.skipped_not_relevant || 0) + (st.skipped_out_of_scope || 0)));
+        var live = st.live || {};
+        ['pages', 'cards', 'skipped', 'opened', 'fetched'].forEach(function (k) { set('[data-live-' + k + ']', String(live[k] || 0)); });
+        var logBox = panel.querySelector('[data-collect-log]');
+        if (logBox && st.log_tail) { logBox.textContent = st.log_tail.slice(-12).join('\n'); }
         var bar = panel.querySelector('[data-collect-bar]');
         if (bar) { bar.max = Math.max(st.search_total || 1, 1); bar.value = st.search_done || 0; }
         if (st.search_total) {

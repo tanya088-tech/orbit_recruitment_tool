@@ -109,6 +109,8 @@ class NaukriSource(BrowserListSource):
                     jobs.append(job)
                     if job.job_id:
                         known.add(str(job.job_id))
+            except KeyboardInterrupt as exc:    # the Stop button: keep what was fetched so far (it is saved), then stop
+                stop = exc
             except Exception as exc:            # BlockedError / SetupError: keep the earlier terms, then report it
                 if exc.__class__.__name__ not in ("BlockedError", "SetupError"):
                     raise

@@ -109,6 +109,7 @@ class BrowserClient:
                 self._ctx = browser.contexts[0] if browser.contexts else browser.new_context(locale="en-IN")
                 self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
                 self._shared = True
+                self._skip_heavy(self._page)
                 if settings.BROWSER_MINIMIZE_WINDOW and not settings.BROWSER_HEADLESS:
                     self._minimize(self._page)
                 return self._page
@@ -126,6 +127,7 @@ class BrowserClient:
                 args=["--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
                       "--disable-background-timer-throttling"])
             self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
+            self._skip_heavy(self._page)
             if settings.BROWSER_MINIMIZE_WINDOW and not settings.BROWSER_HEADLESS:
                 self._minimize(self._page)
         except Exception as exc:                     # chromium missing, profile locked by another window, ...
@@ -145,12 +147,31 @@ class BrowserClient:
         if self._ctx is not None:
             try:
                 self._page = self._ctx.new_page()
+                self._skip_heavy(self._page)
                 if settings.BROWSER_MINIMIZE_WINDOW and not settings.BROWSER_HEADLESS:
                     self._minimize(self._page)
                 return
             except Exception as exc:
                 log.warning("could not open a new page in the browser (%s); restarting the browser", type(exc).__name__)
                 self.close()
+
+    @staticmethod
+    def _skip_heavy(page: Any) -> None:
+        """Do not download images, video or fonts (settings.BROWSER_SKIP_RESOURCE_TYPES): the tool reads only the page's
+        text and HTML, so this makes each page load lighter without changing anything that is read. Best effort."""
+        types = frozenset(settings.BROWSER_SKIP_RESOURCE_TYPES or ())
+        if not types or not hasattr(page, "route"):
+            return
+
+        def handle(route: Any) -> None:
+            if route.request.resource_type in types:
+                route.abort()
+            else:
+                route.fallback()
+        try:
+            page.route("**/*", handle)
+        except Exception as exc:
+            log.debug("could not skip images/fonts: %s", exc)
 
     def _minimize(self, page: Any) -> None:
         """Minimize the collection window so it does not open in front of the dashboard. Best effort: if the browser

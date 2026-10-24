@@ -21,9 +21,22 @@ from config import settings
 from dashboard import branding, views
 from dashboard.collection import CollectionManager
 from dashboard.demo import DEMO_BANNER, build_demo
-from dashboard.server import STATIC_DIR, DashboardApp, make_handler
+from dashboard.server import CLIENT_GONE, STATIC_DIR, DashboardApp, make_handler
 from store.ingest import ingest_filtered_file, newest_normalized_file
 from store.json_store import JsonJobHistory, JsonPosterEntries, JsonRecruiterState
+
+
+class DashboardHTTPServer(ThreadingHTTPServer):
+    """The dashboard's web server. A browser that drops a connection early (a reload, or the page's poll every 3 seconds)
+    is not an error, so it no longer prints "BrokenPipeError: [Errno 32]" and a dashed line in the terminal."""
+
+    daemon_threads = True                 # an open connection must never keep the old process alive during a restart
+
+    def handle_error(self, request, client_address) -> None:
+        if isinstance(sys.exc_info()[1], CLIENT_GONE):
+            logging.getLogger("run_dashboard").debug("browser at %s closed the connection early", client_address)
+            return
+        super().handle_error(request, client_address)
 
 
 def _already_running(host: str, port: int) -> bool:
@@ -135,8 +148,7 @@ def main() -> int:
             holder["server"].shutdown()
 
     app = DashboardApp(history, state, posters=JsonPosterEntries(Path(data_dir) / "poster_entries.json"), banner=banner, collection=collection, restart_fn=request_restart)
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
-    server.daemon_threads = True              # an open connection must never keep the old process alive during a restart
+    server = DashboardHTTPServer((args.host, args.port), make_handler(app))
     holder["server"] = server
     print(f"\nAce Talent Consulting dashboard running at {url}\n  vacancies in history: {len(history.list_jobs())}"
           f"\n  data folder: {data_dir}\n  Press Ctrl+C to stop.\n")

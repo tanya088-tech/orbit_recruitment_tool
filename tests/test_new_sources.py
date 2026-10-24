@@ -352,6 +352,21 @@ def test_a_403_midway_keeps_earlier_keywords_and_reports_the_block_once():
     assert not any("financial-services-jobs" in u for u in page.visited)       # the source stopped
 
 
+def test_stop_midway_keeps_the_jobs_already_fetched_by_earlier_keywords():
+    """Naukri holds each keyword's jobs until all keywords are searched; Stop (Ctrl+Break -> KeyboardInterrupt) must not lose them."""
+    class P(ScriptedPage):
+        def goto(self, url, **kw):
+            if "bank-jobs?" in url:
+                raise KeyboardInterrupt
+            return super().goto(url, **kw)
+    card = ('<div class="srp-jobtuple-wrapper" data-job-id="900000000001"><a class="title" title="A" href="https://www.naukri.com/job-listings-x-900000000001">A</a>'
+            '<span class="job-post-day">Just now</span></div>')
+    page = P({"gcc-jobs?": "<html>" + card + "</html>", "job-listings": fresh(read("naukri_detail_procurement.html"))})
+    res = Collector(NaukriSource(client=client(page))).run([SearchParams("GCC OR bank OR financial services", "India", days=1, max_pages=1)])
+    assert [j.job_id for j in res.jobs] == ["900000000001"]
+    assert not any("financial-services-jobs" in u for u in page.visited)       # stopped: later keywords are not searched
+
+
 def test_dashboard_shows_a_blocked_source_clearly_and_runs_the_other_sources(tmp_path):
     from tests.test_cross_source import fake_runner_factory, make_mgr
     from dashboard.collection import PARTIAL, short_reason

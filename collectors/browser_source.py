@@ -129,6 +129,7 @@ class BrowserListSource(JobSource):
                         continue
                     consecutive_failures = 0
                     browser_failures = 0
+                    log.info("Fetched job %s: %s - %s", job_id, job.company or "(no company)", job.title or "(no title)")   # read live by the dashboard
                     if not is_within_days(job.posted_date, days):     # the exact date from the job page overrides the card's estimate
                         stats.skipped_out_of_range += 1
                         continue

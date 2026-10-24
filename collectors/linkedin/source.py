@@ -120,6 +120,7 @@ class LinkedInSource(JobSource):
                     continue
 
                 consecutive_failures = 0
+                log.info("Fetched job %s: %s - %s", job_id, job.company or "(no company)", job.title or "(no title)")   # read live by the dashboard
                 stats.collected += 1
                 collected_here += 1
                 if params.count_known:

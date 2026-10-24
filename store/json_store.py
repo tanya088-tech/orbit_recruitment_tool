@@ -19,7 +19,7 @@ from typing import Any, Callable, Optional
 
 from store.base import (DEFAULT_STATUS, MAX_NOTE_LENGTH, STATUSES, IngestResult,
                         JobHistoryStore, RecruiterStateStore, StoreError)
-from store.keys import job_key, lane, match_url, vacancy_fingerprint
+from store.keys import is_repost, job_key, lane, match_url, vacancy_fingerprint
 
 _KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
@@ -143,8 +143,9 @@ class JsonJobHistory(JobHistoryStore):
                     if not twin:
                         fp = vacancy_fingerprint(rec)
                         for cand in by_print.get((rec_lane, fp or ""), []):
-                            if _src((data["jobs"][cand].get("record") or {}).get("source")) != _src(rec.get("source")):
-                                twin = cand           # the same opening, listed on a different source
+                            crec = data["jobs"][cand].get("record") or {}
+                            if _src(crec.get("source")) != _src(rec.get("source")) or is_repost(crec, rec):
+                                twin = cand           # the same opening, listed on a different source or re-posted on the same one
                                 break
                     if twin:
                         key = twin                      # same vacancy already stored under another source's key
@@ -172,8 +173,8 @@ class JsonJobHistory(JobHistoryStore):
                     entry["last_seen_run_id"], entry["last_seen_at"] = run_id, _iso(now)
                     entry["times_seen"] = entry.get("times_seen", 1) + 1
                     _fill_missing(entry["record"], rec)
-                    if own_key != key and _src(rec.get("source")) != _src(entry["record"].get("source")):
-                        _add_also_listed(entry["record"], rec)      # keep the other source's link and id
+                    if own_key != key:
+                        _add_also_listed(entry["record"], rec)      # keep the other listing's link and id (other source or a repost)
                         by_alt[(_src(rec.get("source")), str(rec.get("job_id")))] = key
                     result.existing += 1
                     result.existing_keys.append(key)

@@ -57,6 +57,8 @@ BROWSER_SHARED_ACROSS_PLACES = True            # one browser window for the whol
 BROWSER_SOURCES = ("naukri",)                  # sources that read pages with the browser
 BROWSER_PROFILE_DIR = BASE_DIR / "data" / "browser_profile"   # cookies stay here between runs, like a normal browser profile
 BROWSER_WAIT_MS = 15000                       # how long to wait for a page's job list / description to appear
+BROWSER_SKIP_RESOURCE_TYPES = ()             # resource types the collection browser does not download, e.g. ("image", "media", "font").
+                                              # Off: measured on Naukri (24 Oct) it made pages slower, not faster (every request passes through Python)
 
 # --- Phase 3: dashboard & history ---
 DATA_DIR = BASE_DIR / "data"                 # job_history.json + recruiter_state.json live here
@@ -93,6 +95,10 @@ COLLECTION_SKIP_INELIGIBLE_BEFORE_FETCH = True    # do not download the detail p
 NAUKRI_KEYWORD_SHARE_FACTOR = 2                   # with a number of vacancies N, Naukri opens about N / keywords x this many postings per keyword
                                                   # (each keyword is a separate Naukri search), instead of N for every keyword. 0 = N per keyword (old)
 NAUKRI_MAX_PAGES_PER_KEYWORD = 5                  # Naukri result pages read per search term (20 listings each); keeps a run with many terms bounded
+NAUKRI_SEARCH_LOCATIONS = ("India",)              # where Naukri is searched instead of every Indian city in the list: one India-wide search per term
+                                                  # (a city search for an employer mostly repeats the India-wide results). () = every city, as before
+COLLECTION_KEEP_AWAKE = True                      # keep the computer from sleeping while a collection runs (the screen may still turn off).
+                                                  # A critical battery or a closed lid can still put it to sleep
 # What the dashboard searches on Naukri. Naukri does not understand "GCC" the way LinkedIn does (it returned mostly BPO, staffing and
 # real-estate jobs), so Naukri searches the employers the client wants by name, plus a few role terms. Each entry is one Naukri search;
 # results are merged newest first. Edit freely (fewer terms = faster). Empty list = use COLLECTION_KEYWORDS like LinkedIn.

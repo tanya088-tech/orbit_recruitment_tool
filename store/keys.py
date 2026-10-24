@@ -6,6 +6,7 @@ The key is URL-safe, so it is also used in dashboard links (/job/<key>).
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import re
 from typing import Any, Optional
@@ -102,3 +103,29 @@ def vacancy_fingerprint(record: dict[str, Any]) -> Optional[str]:
     if not (company and title and city) or city in ("india", "remote"):
         return None
     return f"{company}|{title}|{city}"
+
+
+REPOST_SIMILARITY = 0.9          # descriptions at least this similar (0-1) make a re-posted vacancy on the SAME source
+REPOST_MIN_DESCRIPTION = 200     # characters; shorter descriptions prove nothing, so they are never treated as reposts
+
+
+def _desc(rec: dict[str, Any]) -> str:
+    return " ".join(_norm(rec.get("description")).split())[:4000]
+
+
+def is_repost(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """True when b is the same opening as a, posted again on the SAME source under a new job id (e.g. LinkedIn
+    reposts): same company + title + city, same source, and nearly the same description (both at least
+    REPOST_MIN_DESCRIPTION characters). Two openings with the same title but different descriptions stay separate."""
+    fp = vacancy_fingerprint(a)
+    if not fp or fp != vacancy_fingerprint(b):
+        return False
+    if str(a.get("source") or "").strip().lower() != str(b.get("source") or "").strip().lower():
+        return False
+    da, db = _desc(a), _desc(b)
+    if len(da) < REPOST_MIN_DESCRIPTION or len(db) < REPOST_MIN_DESCRIPTION:
+        return False
+    if da == db:
+        return True
+    m = difflib.SequenceMatcher(None, da, db, autojunk=False)
+    return m.real_quick_ratio() >= REPOST_SIMILARITY and m.quick_ratio() >= REPOST_SIMILARITY and m.ratio() >= REPOST_SIMILARITY

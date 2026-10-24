@@ -42,6 +42,10 @@ from store.base import JobHistoryStore, RecruiterStateStore, StoreError
 from store.json_store import MemoryPosterEntries
 
 log = logging.getLogger(__name__)
+
+# The browser dropped the connection before the answer was written (a page reload, or app.js's poll every 3 seconds being
+# replaced). Harmless, so it is not reported as an error.
+CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_TYPES = {"style.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8",
                 branding.LOGO_FILE: "image/png"}
@@ -117,11 +121,14 @@ def make_handler(app: DashboardApp):
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", CSP)
             self.send_header("Referrer-Policy", "same-origin")   # not no-referrer: that makes browsers send "Origin: null" on form posts
-            for k, v in (extra or {}).items():
-                self.send_header(k, v)
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
+            try:
+                for k, v in (extra or {}).items():
+                    self.send_header(k, v)
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+            except CLIENT_GONE as exc:       # the browser closed the connection first (reload, 3-second poll): nothing to answer
+                log.debug("browser left before the answer was sent (%s %s): %s", self.command, self.path, type(exc).__name__)
 
         def _html(self, status: int, html_text: str):
             self._send(status, html_text.encode("utf-8"))

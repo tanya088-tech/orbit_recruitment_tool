@@ -300,6 +300,20 @@ def _counts_html(st: dict[str, Any]) -> str:
             f'<span>Status: <b data-count-status>{esc(outcome)}</b></span></p>' + _per_source_html(st))
 
 
+LIVE_FIELDS = (("pages", "Search pages read"), ("cards", "Job cards seen"), ("skipped", "Skipped (cannot qualify)"),
+               ("opened", "Job pages opened"), ("fetched", "Jobs fetched"))
+
+
+def _live_html(st: dict[str, Any]) -> str:
+    """While a collection runs: what the scraper has done so far, refreshed every few seconds. Fetched jobs are checked
+    and added to the list when each pass is saved, so "Collected" above can stay lower until then."""
+    live = st.get("live") or {}
+    spans = "".join(f'<span>{esc(label)}: <b data-live-{key}>{int(live.get(key) or 0)}</b></span>' for key, label in LIVE_FIELDS)
+    return (f'<p class="collect-counts" data-collect-live aria-label="Progress so far">{spans}</p>'
+            '<p class="sub">Live progress. Fetched jobs are checked (GCC/BFSI, location) and added to your list when each search '
+            'pass is saved; with Naukri searched India-wide that is at the end of the run or when you press Stop.</p>')
+
+
 def _per_source_html(st: dict[str, Any]) -> str:
     """One line per source: what each found, what it contributed to the list, and what the rules turned away."""
     ps = st.get("per_source") or {}
@@ -342,18 +356,20 @@ def _collection_panel(cv: Optional[dict[str, Any]], here: str, now: datetime, no
     if running:
         progress = (f'<progress class="collect-bar" data-collect-bar max="{max(total, 1)}" value="{min(done, max(total, 1))}"></progress>'
                     f'<p class="sub" data-collect-detail>{esc("Place " + str(done + 1 if done < total else total) + " of " + str(total)) if total else ""}'
-                    f'{" - " + esc(st["current_search"]) if st.get("current_search") else ""}{", page " + esc(st["current_page"]) if st.get("current_page") else ""}</p>')
+                    f'{" - " + esc(st["current_search"]) if st.get("current_search") else ""}{", page " + esc(st["current_page"]) if st.get("current_page") else ""}</p>'
+                    + _live_html(st))
     # A source that stopped early (e.g. LinkedIn HTTP 429) is not shown as a red banner; the vacancies collected are shown as usual
     # and the technical reason stays under Details and in the log.
     error = (f'<p class="error" role="alert" data-collect-error>{esc(st["last_error"])}</p>'
              if st.get("last_error") and st.get("stop_reason") != "blocked" else "")
     warnings = ""
-    if st.get("warnings") or st.get("log_tail"):
+    if st.get("warnings") or st.get("log_tail") or running:
         items = "".join(f"<li>{esc(w)}</li>" for w in st.get("warnings", [])[:8])
         tail = "\n".join(st.get("log_tail", [])[-12:])
         warnings = ("<details class=\"collect-log\"><summary>Details</summary>"
                     + (f"<p class=\"sub\">Problems reported by the collector:</p><ul>{items}</ul>" if items else "")
-                    + (f"<pre>{esc(tail)}</pre>" if tail else "") + "</details>")
+                    # while running, the page refreshes these lines every few seconds (app.js)
+                    + (f"<pre data-collect-log>{esc(tail)}</pre>" if (tail or running) else "") + "</details>")
     # the form shows what the last run used (scope, window, number), so it never disagrees with the status above it
     # the form always opens with the defaults (LinkedIn + Naukri, India, last 24 hours); what the last run used is shown in its status above
     chosen_scope = cv["default_scope"] if cv["default_scope"] in loc_config.SCOPES else "india"
